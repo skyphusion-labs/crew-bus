@@ -14,6 +14,10 @@ concurrency:
   group: ci-crew-bus-${{ github.ref }}
   cancel-in-progress: true
 
+# npm workspaces: single root package-lock.json. Install once at repo root,
+# then run each package's scripts from its working-directory (node_modules
+# is hoisted / linked by the workspace install).
+
 jobs:
   worker:
     runs-on: [self-hosted, fleet]
@@ -26,8 +30,10 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: worker/package-lock.json
-      - run: npm ci
+          cache-dependency-path: package-lock.json
+      - name: Install (workspace root)
+        working-directory: .
+        run: npm ci
       - run: npm run typecheck
       - run: npm test
 
@@ -42,8 +48,10 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: mcp/package-lock.json
-      - run: npm ci
+          cache-dependency-path: package-lock.json
+      - name: Install (workspace root)
+        working-directory: .
+        run: npm ci
       - run: npm run typecheck
       - run: npm run build
       - run: npm test

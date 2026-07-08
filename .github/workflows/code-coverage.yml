@@ -22,6 +22,8 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: worker/package-lock.json
-      - run: npm ci
+          cache-dependency-path: package-lock.json
+      - name: Install (workspace root)
+        working-directory: .
+        run: npm ci
       - run: npx vitest run --coverage
