@@ -1,4 +1,5 @@
 import type { Env } from "./env";
+import { BusError, clientErrorMessage } from "./bus-error";
 import { json, matchConsumer, bearerToken } from "./auth";
 import { CHANNELS, MESSAGE_TYPES, PRIORITIES } from "./bus-types";
 import { ackMessage, getThread, listChannels, pollMessages, sendMessage } from "./store";
@@ -103,8 +104,17 @@ function toolText(value: unknown): { content: { type: "text"; text: string }[]; 
 }
 
 function toolFail(err: unknown) {
-  const msg = err instanceof Error ? err.message : String(err);
-  return { content: [{ type: "text", text: `Error: ${msg}` }], isError: true };
+  const message = clientErrorMessage(err);
+  if (message === null) {
+    console.error(
+      JSON.stringify({
+        event: "mcp_tool_error",
+        detail: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      }),
+    );
+  }
+  return { content: [{ type: "text", text: `Error: ${message ?? "bad request"}` }], isError: true };
 }
 
 async function callTool(
@@ -138,13 +148,13 @@ async function callTool(
     }
     case "bus_thread": {
       const threadId = String(args.thread_id ?? "").trim();
-      if (!threadId) throw new Error("thread_id is required");
+      if (!threadId) throw new BusError("thread_id is required");
       const messages = await getThread(env.DB, threadId, consumer);
       return toolText({ ok: true, thread_id: threadId, count: messages.length, messages });
     }
     case "bus_ack": {
       const messageId = String(args.message_id ?? "").trim();
-      if (!messageId) throw new Error("message_id is required");
+      if (!messageId) throw new BusError("message_id is required");
       const message = await ackMessage(
         env.DB,
         consumer,
@@ -158,7 +168,7 @@ async function callTool(
       return toolText({ ok: true, consumer, channels });
     }
     default:
-      throw new Error(`Unknown tool: ${name}`);
+      throw new BusError(`Unknown tool: ${name}`);
   }
 }
 
