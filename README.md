@@ -61,10 +61,23 @@ Cursor / Claude Code MCP config:
 | Tool | Purpose |
 |------|---------|
 | `bus_send` | Post to a channel/thread |
-| `bus_poll` | Messages since cursor (blocking first) |
+| `bus_poll` | Messages since cursor (exclusive; blocking first) |
 | `bus_thread` | Full ordered thread |
 | `bus_ack` | Acknowledge a message |
 | `bus_channels` | Channels + unread counts |
+| `bus_mark_seen` | Clear unread for a channel |
+
+## Smoke test (live Worker)
+
+```bash
+export CREW_BUS_API_URL=https://bus.internal   # or http://localhost:8787
+export CREW_BUS_API_TOKEN=<your-consumer-token>
+./scripts/smoke.sh
+```
+
+## Agent discipline
+
+See `fleet-chezmoi/system/crew-bus/agent-discipline.md`. Poll at turn open; Mackaye has BDA on bus coordination (except unauthorized spend/downtime).
 
 ## Locked decisions (fc#427)
 

@@ -87,4 +87,11 @@ export class CrewBusClient {
   channels() {
     return this.request("GET", "/api/channels");
   }
+
+  markSeen(channel: string, lastSeenAt?: string) {
+    return this.request("POST", "/api/mark_seen", {
+      channel,
+      ...(lastSeenAt ? { last_seen_at: lastSeenAt } : {}),
+    });
+  }
 }

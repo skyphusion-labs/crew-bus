@@ -1,12 +1,13 @@
 import type { Env } from "./env";
 import { bearerToken, json, matchConsumer, requireConsumer } from "./auth";
 import { BusError, clientErrorMessage } from "./bus-error";
-import { CHANNELS } from "./bus-types";
+import { CHANNELS, isChannel } from "./bus-types";
 import {
   ackMessage,
   getThread,
   listChannels,
   markChannelSeen,
+  markChannelSeenLatest,
   pollMessages,
   sendMessage,
 } from "./store";
@@ -75,6 +76,19 @@ export async function handleApi(request: Request, env: Env, pathname: string): P
     if (pathname === "/api/channels" && request.method === "GET") {
       const channels = await listChannels(env.DB, consumer);
       return json({ ok: true, consumer, channels });
+    }
+
+    if (pathname === "/api/mark_seen" && request.method === "POST") {
+      const body = await readJson(request);
+      const channel = String(body.channel ?? "").trim();
+      if (!isChannel(channel)) throw new BusError(`invalid channel: ${channel}`);
+      const at = body.last_seen_at ? String(body.last_seen_at) : undefined;
+      if (at) {
+        await markChannelSeen(env.DB, consumer, channel, at);
+        return json({ ok: true, channel, last_seen_at: at });
+      }
+      const marked = await markChannelSeenLatest(env.DB, consumer, channel);
+      return json({ ok: true, ...marked });
     }
 
     return json({ error: "not_found" }, 404);
