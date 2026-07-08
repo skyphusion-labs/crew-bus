@@ -1,0 +1,228 @@
+import type { Env } from "./env";
+import { json, matchConsumer, bearerToken } from "./auth";
+import { CHANNELS, MESSAGE_TYPES, PRIORITIES } from "./bus-types";
+import { ackMessage, getThread, listChannels, pollMessages, sendMessage } from "./store";
+
+const SERVER_INFO = { name: "crew-bus", version: "0.1.0" };
+const PROTOCOL_VERSION = "2025-06-18";
+
+const TOOLS = [
+  {
+    name: "bus_send",
+    description:
+      "Post a structured message to a crew-bus channel. Use to: [\"*\"] to broadcast. " +
+      "Set requires_ack for coordination gates. Include refs (repo, issue, branch, pr) when relevant.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        channel: { type: "string", enum: [...CHANNELS] },
+        thread_id: { type: "string", description: "Existing thread id; omit to start a new thread" },
+        to: {
+          type: "array",
+          items: { type: "string" },
+          description: 'Recipients (consumer names) or ["*"] for broadcast',
+        },
+        type: { type: "string", enum: [...MESSAGE_TYPES] },
+        priority: { type: "string", enum: [...PRIORITIES] },
+        body: { type: "string" },
+        refs: {
+          type: "object",
+          properties: {
+            repo: { type: "string" },
+            issue: { type: "string" },
+            branch: { type: "string" },
+            pr: { type: "string", nullable: true },
+          },
+        },
+        requires_ack: { type: "boolean" },
+        ack_of: { type: "string", description: "Required when type is ack" },
+      },
+      required: ["channel", "to", "type", "body"],
+    },
+  },
+  {
+    name: "bus_poll",
+    description:
+      "Fetch messages visible to the authenticated consumer since an ISO timestamp. " +
+      "Blocking messages sort first. Poll at turn open and after asking blocking questions.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        channel: { type: "string", enum: [...CHANNELS] },
+        since: { type: "string", description: "ISO-8601 timestamp; omit for all retained history" },
+        limit: { type: "number", description: "Max messages (1-200, default 50)" },
+      },
+    },
+  },
+  {
+    name: "bus_thread",
+    description: "Fetch every message in a thread, ordered oldest-first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        thread_id: { type: "string" },
+      },
+      required: ["thread_id"],
+    },
+  },
+  {
+    name: "bus_ack",
+    description: "Acknowledge a message (records ack + posts ack-type reply to sender).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        message_id: { type: "string" },
+        body: { type: "string", description: "Optional ack body (default: ack <id>)" },
+      },
+      required: ["message_id"],
+    },
+  },
+  {
+    name: "bus_channels",
+    description: "List channels with unread counts for the authenticated consumer.",
+    inputSchema: { type: "object", properties: {} },
+  },
+] as const;
+
+interface RpcMessage {
+  jsonrpc?: string;
+  id?: string | number | null;
+  method?: string;
+  params?: Record<string, unknown>;
+}
+
+function rpcResult(id: unknown, result: unknown) {
+  return { jsonrpc: "2.0", id, result };
+}
+function rpcError(id: unknown, code: number, message: string) {
+  return { jsonrpc: "2.0", id, error: { code, message } };
+}
+
+function toolText(value: unknown): { content: { type: "text"; text: string }[]; isError?: boolean } {
+  return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
+}
+
+function toolFail(err: unknown) {
+  const msg = err instanceof Error ? err.message : String(err);
+  return { content: [{ type: "text", text: `Error: ${msg}` }], isError: true };
+}
+
+async function callTool(
+  env: Env,
+  consumer: string,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<{ content: { type: "text"; text: string }[]; isError?: boolean }> {
+  switch (name) {
+    case "bus_send": {
+      const message = await sendMessage(env.DB, consumer, {
+        channel: String(args.channel ?? ""),
+        thread_id: args.thread_id ? String(args.thread_id) : undefined,
+        to: args.to as string[],
+        type: String(args.type ?? ""),
+        priority: args.priority ? String(args.priority) : undefined,
+        body: String(args.body ?? ""),
+        refs: (args.refs as Record<string, unknown> | null | undefined) ?? null,
+        requires_ack: Boolean(args.requires_ack),
+        ack_of: args.ack_of ? String(args.ack_of) : null,
+      });
+      return toolText({ ok: true, message });
+    }
+    case "bus_poll": {
+      const page = await pollMessages(env.DB, consumer, {
+        channel: args.channel ? String(args.channel) : undefined,
+        since: args.since ? String(args.since) : undefined,
+        limit: args.limit !== undefined ? Number(args.limit) : undefined,
+      });
+      return toolText({ ok: true, consumer, ...page });
+    }
+    case "bus_thread": {
+      const threadId = String(args.thread_id ?? "").trim();
+      if (!threadId) throw new Error("thread_id is required");
+      const messages = await getThread(env.DB, threadId, consumer);
+      return toolText({ ok: true, thread_id: threadId, count: messages.length, messages });
+    }
+    case "bus_ack": {
+      const messageId = String(args.message_id ?? "").trim();
+      if (!messageId) throw new Error("message_id is required");
+      const message = await ackMessage(
+        env.DB,
+        consumer,
+        messageId,
+        args.body ? String(args.body) : undefined,
+      );
+      return toolText({ ok: true, message });
+    }
+    case "bus_channels": {
+      const channels = await listChannels(env.DB, consumer);
+      return toolText({ ok: true, consumer, channels });
+    }
+    default:
+      throw new Error(`Unknown tool: ${name}`);
+  }
+}
+
+async function handleRpc(msg: RpcMessage, env: Env, consumer: string): Promise<unknown> {
+  const { id, method, params } = msg;
+  switch (method) {
+    case "initialize":
+      return rpcResult(id, {
+        protocolVersion: (params?.protocolVersion as string | undefined) || PROTOCOL_VERSION,
+        capabilities: { tools: {} },
+        serverInfo: SERVER_INFO,
+      });
+    case "ping":
+      return rpcResult(id, {});
+    case "tools/list":
+      return rpcResult(id, { tools: TOOLS });
+    case "tools/call": {
+      const name = params?.name as string | undefined;
+      const args = (params?.arguments as Record<string, unknown>) || {};
+      if (!name || !TOOLS.some((t) => t.name === name)) {
+        return rpcError(id, -32602, `Unknown tool: ${String(name)}`);
+      }
+      try {
+        const result = await callTool(env, consumer, name, args);
+        return rpcResult(id, result);
+      } catch (err) {
+        return rpcResult(id, toolFail(err));
+      }
+    }
+    default:
+      return rpcError(id, -32601, `Method not found: ${String(method)}`);
+  }
+}
+
+export async function handleMcp(request: Request, env: Env): Promise<Response> {
+  const consumer = matchConsumer(env.MCP_TOKEN, bearerToken(request));
+  if (!consumer) {
+    return json({ error: "unauthorized" }, 401, { "WWW-Authenticate": "Bearer" });
+  }
+  console.log(JSON.stringify({ event: "mcp_auth", consumer }));
+
+  if (request.method !== "POST") {
+    return new Response(null, { status: 405, headers: { Allow: "POST" } });
+  }
+
+  let payload: RpcMessage | RpcMessage[];
+  try {
+    payload = (await request.json()) as RpcMessage | RpcMessage[];
+  } catch {
+    return json(rpcError(null, -32700, "Parse error"));
+  }
+
+  const hasId = (m: RpcMessage) => m.id !== undefined && m.id !== null;
+
+  if (Array.isArray(payload)) {
+    const responses: unknown[] = [];
+    for (const m of payload) {
+      if (hasId(m)) responses.push(await handleRpc(m, env, consumer));
+    }
+    return responses.length ? json(responses) : json(null, 202);
+  }
+
+  if (!hasId(payload)) return json(null, 202);
+  return json(await handleRpc(payload, env, consumer));
+}
+
+export { TOOLS };

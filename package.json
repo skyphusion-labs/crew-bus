@@ -1,0 +1,14 @@
+{
+  "name": "crew-bus",
+  "private": true,
+  "description": "Cross-crew MCP message bus (Cursor ↔ Claude crew)",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "workspaces": [
+    "worker",
+    "mcp"
+  ]
+}
