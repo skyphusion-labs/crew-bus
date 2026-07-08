@@ -1,5 +1,6 @@
 import type { Env } from "./env";
 import { bearerToken, json, matchConsumer, requireConsumer } from "./auth";
+import { BusError, clientErrorMessage } from "./bus-error";
 import { CHANNELS } from "./bus-types";
 import {
   ackMessage,
@@ -14,7 +15,7 @@ async function readJson(request: Request): Promise<Record<string, unknown>> {
   try {
     return (await request.json()) as Record<string, unknown>;
   } catch {
-    throw new Error("invalid JSON body");
+    throw new BusError("invalid JSON body");
   }
 }
 
@@ -66,7 +67,7 @@ export async function handleApi(request: Request, env: Env, pathname: string): P
     if (pathname === "/api/ack" && request.method === "POST") {
       const body = await readJson(request);
       const messageId = String(body.message_id ?? "").trim();
-      if (!messageId) throw new Error("message_id is required");
+      if (!messageId) throw new BusError("message_id is required");
       const message = await ackMessage(env.DB, consumer, messageId, body.body ? String(body.body) : undefined);
       return json({ ok: true, message });
     }
@@ -78,8 +79,18 @@ export async function handleApi(request: Request, env: Env, pathname: string): P
 
     return json({ error: "not_found" }, 404);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return json({ ok: false, error: message }, 400);
+    const message = clientErrorMessage(err);
+    if (message) {
+      return json({ ok: false, error: message }, 400);
+    }
+    console.error(
+      JSON.stringify({
+        event: "api_error",
+        detail: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      }),
+    );
+    return json({ ok: false, error: "bad request" }, 400);
   }
 }
 

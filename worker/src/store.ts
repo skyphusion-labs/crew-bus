@@ -1,3 +1,4 @@
+import { BusError } from "./bus-error";
 import type { Env } from "./env";
 import {
   type BusMessage,
@@ -50,11 +51,11 @@ function rowToMessage(row: MessageRow): BusMessage {
 
 function parseTo(value: unknown): string[] {
   if (!Array.isArray(value) || value.length === 0) {
-    throw new Error("to must be a non-empty array");
+    throw new BusError("to must be a non-empty array");
   }
   for (const item of value) {
     if (typeof item !== "string" || !item.trim()) {
-      throw new Error("to entries must be non-empty strings");
+      throw new BusError("to entries must be non-empty strings");
     }
   }
   return value as string[];
@@ -78,21 +79,21 @@ export async function sendMessage(
   input: SendInput,
 ): Promise<BusMessage> {
   if (!isChannel(input.channel)) {
-    throw new Error(`invalid channel: ${input.channel}`);
+    throw new BusError(`invalid channel: ${input.channel}`);
   }
   if (!isMessageType(input.type)) {
-    throw new Error(`invalid type: ${input.type}`);
+    throw new BusError(`invalid type: ${input.type}`);
   }
   const priority = input.priority ?? "normal";
   if (!isPriority(priority)) {
-    throw new Error(`invalid priority: ${priority}`);
+    throw new BusError(`invalid priority: ${priority}`);
   }
   const to = parseTo(input.to);
   const body = String(input.body ?? "").trim();
-  if (!body) throw new Error("body is required");
+  if (!body) throw new BusError("body is required");
 
   if (input.type === "ack" && !input.ack_of) {
-    throw new Error("ack messages require ack_of");
+    throw new BusError("ack messages require ack_of");
   }
 
   const id = newId("msg");
@@ -170,7 +171,7 @@ export async function pollMessages(
   const binds: unknown[] = [opts.since ?? null];
 
   if (opts.channel) {
-    if (!isChannel(opts.channel)) throw new Error(`invalid channel: ${opts.channel}`);
+    if (!isChannel(opts.channel)) throw new BusError(`invalid channel: ${opts.channel}`);
     query += ` AND channel = ?`;
     binds.push(opts.channel);
   }
@@ -226,11 +227,11 @@ export async function ackMessage(
     .prepare(`SELECT * FROM messages WHERE id = ?`)
     .bind(messageId)
     .first<MessageRow>();
-  if (!row) throw new Error(`message not found: ${messageId}`);
+  if (!row) throw new BusError(`message not found: ${messageId}`);
 
   const original = rowToMessage(row);
   if (!isVisibleTo(original.to, from) && original.from !== from) {
-    throw new Error("not authorized to ack this message");
+    throw new BusError("not authorized to ack this message");
   }
 
   return sendMessage(db, from, {
