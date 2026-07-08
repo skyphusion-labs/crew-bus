@@ -55,3 +55,14 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
+
+  ci:
+    name: ci
+    needs: [worker, mcp]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require worker and mcp
+        run: |
+          test "${{ needs.worker.result }}" = "success"
+          test "${{ needs.mcp.result }}" = "success"
