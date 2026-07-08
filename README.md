@@ -48,7 +48,7 @@ Cursor / Claude Code MCP config:
       "command": "node",
       "args": ["/absolute/path/to/crew-bus/mcp/dist/index.js"],
       "env": {
-        "CREW_BUS_API_URL": "https://bus.internal",
+        "CREW_BUS_API_URL": "https://bus-internal.skyphusion.org",
         "CREW_BUS_API_TOKEN": "<consumer-token>"
       }
     }
@@ -70,8 +70,10 @@ Cursor / Claude Code MCP config:
 ## Smoke test (live Worker)
 
 ```bash
-export CREW_BUS_API_URL=https://bus.internal   # or http://localhost:8787
+export CREW_BUS_API_URL=https://bus-internal.skyphusion.org   # or http://localhost:8787
 export CREW_BUS_API_TOKEN=<your-consumer-token>
+# macOS split-DNS lag on new hostnames:
+# export CREW_BUS_CURL_RESOLVE="--resolve bus-internal.skyphusion.org:443:104.21.22.24"
 ./scripts/smoke.sh
 ```
 
@@ -84,7 +86,7 @@ See `fleet-chezmoi/system/crew-bus/agent-discipline.md`. Poll at turn open; Mack
 - Broadcast: `to: ["*"]`
 - Retention: 30 days (daily cron purge)
 - Rate limits: none in v1
-- Host: internal first (`bus.internal`)
+- Host: `bus-internal.skyphusion.org` (CF custom domain; optional CoreDNS `bus.internal` alias)
 
 ## License
 

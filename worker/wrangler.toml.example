@@ -28,7 +28,8 @@ crons = ["0 4 * * *"]
 [vars]
 RETENTION_DAYS = "30"
 
-# Internal host — set at deploy time per fleet DNS pattern.
+# Internal host — CF custom domain (bearer-gated; WARP/laptop/crew reachable).
+# CoreDNS `bus.internal` alias is optional follow-up; use this hostname in MCP config.
 [[routes]]
-pattern = "bus.internal"
+pattern = "bus-internal.skyphusion.org"
 custom_domain = true

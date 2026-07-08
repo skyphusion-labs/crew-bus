@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // crew-bus stdio MCP server. Calls the Worker REST API; stdout is JSON-RPC only.
 
+import dns from "node:dns";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CrewBusClient } from "./client.js";
@@ -15,6 +16,19 @@ function requireEnv(name: string): string {
   return v;
 }
 
+async function resolveConnectIp(apiUrl: string): Promise<string | undefined> {
+  const configured = (process.env.CREW_BUS_CONNECT_IP ?? "").trim();
+  if (configured) return configured;
+  const host = new URL(apiUrl).hostname;
+  if (host === "localhost" || host === "127.0.0.1") return undefined;
+  try {
+    const addrs = await dns.promises.resolve4(host);
+    return addrs[0];
+  } catch {
+    return undefined;
+  }
+}
+
 async function main(): Promise<void> {
   const apiUrl = requireEnv("CREW_BUS_API_URL");
   if (!/^https?:\/\//.test(apiUrl)) {
@@ -23,8 +37,9 @@ async function main(): Promise<void> {
   }
   const token = requireEnv("CREW_BUS_API_TOKEN");
   const timeoutMs = Number(process.env.CREW_BUS_API_TIMEOUT_MS ?? "15000") || 15000;
+  const connectIp = await resolveConnectIp(apiUrl);
 
-  const client = new CrewBusClient(apiUrl, token, { timeoutMs });
+  const client = new CrewBusClient(apiUrl, token, { timeoutMs, connectIp });
   const server = new McpServer({ name: "crew-bus-mcp", version: "0.1.0" });
   const registered = registerTools(server, client);
 
