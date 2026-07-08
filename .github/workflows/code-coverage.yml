@@ -9,6 +9,9 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  code-quality: write
+  pull-requests: write
 
 jobs:
   coverage:
@@ -26,4 +29,10 @@ jobs:
       - name: Install (workspace root)
         working-directory: .
         run: npm ci
-      - run: npx vitest run --coverage
+      - run: npx vitest run --coverage.enabled=true --coverage.reporter=cobertura
+      - name: Upload coverage report
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/upload-code-coverage@v1
+        with:
+          file: ./worker/coverage/cobertura-coverage.xml
+          language: javascript
