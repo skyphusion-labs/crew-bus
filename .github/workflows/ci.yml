@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-crew-bus-${{ github.ref }}
+  cancel-in-progress: true
+
+# npm workspaces: single root package-lock.json. Install once at repo root,
+# then run each package's scripts from its working-directory (node_modules
+# is hoisted / linked by the workspace install).
+
+jobs:
+  worker:
+    runs-on: [self-hosted, fleet]
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install (workspace root)
+        working-directory: .
+        run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  mcp:
+    runs-on: [self-hosted, fleet]
+    defaults:
+      run:
+        working-directory: mcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install (workspace root)
+        working-directory: .
+        run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test

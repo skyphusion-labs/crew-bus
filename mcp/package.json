@@ -1,0 +1,27 @@
+{
+  "name": "crew-bus-mcp",
+  "version": "0.1.0",
+  "description": "Stdio MCP client for crew-bus (REST API over the Worker)",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "bin": {
+    "crew-bus-mcp": "dist/index.js"
+  },
+  "files": ["dist", "README.md"],
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.5.4",
+    "vitest": "^4.1.10"
+  }
+}

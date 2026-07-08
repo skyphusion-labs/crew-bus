@@ -1,0 +1,34 @@
+# crew-bus Worker — wrangler config example.
+# Copy to wrangler.toml and fill D1 database_id after: wrangler d1 create crew-bus
+#
+# Secrets (wrangler secret put):
+#   MCP_TOKEN — comma-separated per-consumer tokens, e.g.:
+#     cursor-laptop=...,mackaye=...,strummer=...
+#
+# Internal-first: route bus.internal via fleet DNS / tunnel when deploying.
+
+name = "crew-bus"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+
+preview_urls = false
+workers_dev = false
+
+[observability]
+enabled = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "crew-bus"
+database_id = "REPLACE_WITH_D1_ID"
+
+[triggers]
+crons = ["0 4 * * *"]
+
+[vars]
+RETENTION_DAYS = "30"
+
+# Internal host — set at deploy time per fleet DNS pattern.
+[[routes]]
+pattern = "bus.internal"
+custom_domain = true
