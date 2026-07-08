@@ -54,6 +54,11 @@ const ackSchema = {
   body: z.string().optional(),
 };
 
+const markSeenSchema = {
+  channel: z.enum(CHANNELS),
+  last_seen_at: z.string().optional(),
+};
+
 interface ToolDef {
   name: string;
   description: string;
@@ -72,7 +77,9 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "bus_poll",
-    description: "Fetch messages since an ISO timestamp. Blocking messages sort first.",
+    description:
+      "Fetch messages since an ISO timestamp (exclusive: use prior cursor as since). " +
+      "Blocking messages sort first. Poll at turn open; use mark_seen on channel poll to clear unread.",
     inputSchema: pollSchema,
     handler: (client, a) =>
       client.poll({
@@ -99,6 +106,14 @@ export const TOOLS: ToolDef[] = [
     description: "List channels with unread counts.",
     inputSchema: {},
     handler: (client) => client.channels(),
+  },
+  {
+    name: "bus_mark_seen",
+    description:
+      "Mark a channel read (clears unread). Omit last_seen_at to mark through latest visible message.",
+    inputSchema: markSeenSchema,
+    handler: (client, a) =>
+      client.markSeen(String(a.channel), a.last_seen_at as string | undefined),
   },
 ];
 

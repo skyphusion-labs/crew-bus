@@ -167,7 +167,11 @@ export async function pollMessages(
   opts: { channel?: string; since?: string; limit?: number },
 ): Promise<{ messages: BusMessage[]; cursor: string | null }> {
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
-  let query = `SELECT * FROM messages WHERE created_at >= COALESCE(?, '1970-01-01T00:00:00.000Z')`;
+  // Exclusive since: pass the prior poll's cursor as `since` to avoid duplicates.
+  const sinceClause = opts.since
+    ? "created_at > ?"
+    : "created_at >= COALESCE(?, '1970-01-01T00:00:00.000Z')";
+  let query = `SELECT * FROM messages WHERE ${sinceClause}`;
   const binds: unknown[] = [opts.since ?? null];
 
   if (opts.channel) {
@@ -259,6 +263,32 @@ export async function markChannelSeen(
     )
     .bind(consumer, channel, lastSeenAt)
     .run();
+}
+
+/** Mark a channel read up to the latest message visible to this consumer. */
+export async function markChannelSeenLatest(
+  db: D1Database,
+  consumer: string,
+  channel: Channel,
+): Promise<{ channel: Channel; last_seen_at: string }> {
+  if (!isChannel(channel)) throw new BusError(`invalid channel: ${channel}`);
+
+  const { results } = await db
+    .prepare(`SELECT to_json, created_at FROM messages WHERE channel = ? ORDER BY created_at DESC`)
+    .bind(channel)
+    .all<{ to_json: string; created_at: string }>();
+
+  let lastSeenAt = nowIso();
+  for (const row of results ?? []) {
+    const to = JSON.parse(row.to_json) as string[];
+    if (isVisibleTo(to, consumer)) {
+      lastSeenAt = row.created_at;
+      break;
+    }
+  }
+
+  await markChannelSeen(db, consumer, channel, lastSeenAt);
+  return { channel, last_seen_at: lastSeenAt };
 }
 
 export async function purgeExpired(db: D1Database, env: Env): Promise<number> {

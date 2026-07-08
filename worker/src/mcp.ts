@@ -1,8 +1,16 @@
 import type { Env } from "./env";
 import { BusError, clientErrorMessage } from "./bus-error";
 import { json, matchConsumer, bearerToken } from "./auth";
-import { CHANNELS, MESSAGE_TYPES, PRIORITIES } from "./bus-types";
-import { ackMessage, getThread, listChannels, pollMessages, sendMessage } from "./store";
+import { CHANNELS, MESSAGE_TYPES, PRIORITIES, isChannel } from "./bus-types";
+import {
+  ackMessage,
+  getThread,
+  listChannels,
+  markChannelSeen,
+  markChannelSeenLatest,
+  pollMessages,
+  sendMessage,
+} from "./store";
 
 const SERVER_INFO = { name: "crew-bus", version: "0.1.0" };
 const PROTOCOL_VERSION = "2025-06-18";
@@ -44,15 +52,40 @@ const TOOLS = [
   {
     name: "bus_poll",
     description:
-      "Fetch messages visible to the authenticated consumer since an ISO timestamp. " +
-      "Blocking messages sort first. Poll at turn open and after asking blocking questions.",
+      "Fetch messages visible to the authenticated consumer since an ISO timestamp (exclusive: " +
+      "pass the prior poll's cursor as since to avoid duplicates). Blocking messages sort first. " +
+      "Poll at turn open and after asking blocking questions.",
     inputSchema: {
       type: "object",
       properties: {
         channel: { type: "string", enum: [...CHANNELS] },
-        since: { type: "string", description: "ISO-8601 timestamp; omit for all retained history" },
+        since: {
+          type: "string",
+          description: "ISO-8601 timestamp (exclusive lower bound); use cursor from prior poll",
+        },
         limit: { type: "number", description: "Max messages (1-200, default 50)" },
+        mark_seen: {
+          type: "boolean",
+          description: "When channel is set, mark channel read up to cursor after poll",
+        },
       },
+    },
+  },
+  {
+    name: "bus_mark_seen",
+    description:
+      "Mark a channel read for the authenticated consumer (clears unread count). " +
+      "Defaults to latest visible message in the channel.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        channel: { type: "string", enum: [...CHANNELS] },
+        last_seen_at: {
+          type: "string",
+          description: "Optional ISO timestamp; omit to mark through latest visible message",
+        },
+      },
+      required: ["channel"],
     },
   },
   {
@@ -139,11 +172,15 @@ async function callTool(
       return toolText({ ok: true, message });
     }
     case "bus_poll": {
+      const channel = args.channel ? String(args.channel) : undefined;
       const page = await pollMessages(env.DB, consumer, {
-        channel: args.channel ? String(args.channel) : undefined,
+        channel,
         since: args.since ? String(args.since) : undefined,
         limit: args.limit !== undefined ? Number(args.limit) : undefined,
       });
+      if (args.mark_seen && channel && page.cursor && isChannel(channel)) {
+        await markChannelSeen(env.DB, consumer, channel, page.cursor);
+      }
       return toolText({ ok: true, consumer, ...page });
     }
     case "bus_thread": {
@@ -166,6 +203,17 @@ async function callTool(
     case "bus_channels": {
       const channels = await listChannels(env.DB, consumer);
       return toolText({ ok: true, consumer, channels });
+    }
+    case "bus_mark_seen": {
+      const channel = String(args.channel ?? "").trim();
+      if (!isChannel(channel)) throw new BusError(`invalid channel: ${channel}`);
+      if (args.last_seen_at) {
+        const at = String(args.last_seen_at);
+        await markChannelSeen(env.DB, consumer, channel, at);
+        return toolText({ ok: true, channel, last_seen_at: at });
+      }
+      const marked = await markChannelSeenLatest(env.DB, consumer, channel);
+      return toolText({ ok: true, ...marked });
     }
     default:
       throw new BusError(`Unknown tool: ${name}`);
