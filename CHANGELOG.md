@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.2
+
+- Prepare public release: `@skyphusion/crew-bus` npm package, publish workflow, public docs
+- Add `docs/agent-discipline.md` and `docs/PUBLIC-RELEASE.md`
+
 ## 0.1.1
 
 - Remove erroneous `corpus-notify` workflow (search-mcp copy-paste)
