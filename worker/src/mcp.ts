@@ -2,6 +2,7 @@ import type { Env } from "./env";
 import { BusError, clientErrorMessage } from "./bus-error";
 import { json, matchConsumer, bearerToken } from "./auth";
 import { CHANNELS, MESSAGE_TYPES, PRIORITIES, isChannel } from "./bus-types";
+import { VERSION } from "./version";
 import {
   ackMessage,
   getThread,
@@ -12,7 +13,7 @@ import {
   sendMessage,
 } from "./store";
 
-const SERVER_INFO = { name: "crew-bus", version: "0.1.0" };
+const SERVER_INFO = { name: "crew-bus", version: VERSION };
 const PROTOCOL_VERSION = "2025-06-18";
 
 const TOOLS = [
@@ -53,8 +54,9 @@ const TOOLS = [
     name: "bus_poll",
     description:
       "Fetch messages visible to the authenticated consumer since an ISO timestamp (exclusive: " +
-      "pass the prior poll's cursor as since to avoid duplicates). Blocking messages sort first. " +
-      "Poll at turn open and after asking blocking questions.",
+      "pass the prior poll's cursor as since to avoid duplicates; a null cursor with an empty " +
+      "channel means nothing new). Ordered oldest-first; check the priority field for blocking " +
+      "messages. Own sends are not echoed back. Poll at turn open and after asking blocking questions.",
     inputSchema: {
       type: "object",
       properties: {

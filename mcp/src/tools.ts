@@ -79,7 +79,8 @@ export const TOOLS: ToolDef[] = [
     name: "bus_poll",
     description:
       "Fetch messages since an ISO timestamp (exclusive: use prior cursor as since). " +
-      "Blocking messages sort first. Poll at turn open; use mark_seen on channel poll to clear unread.",
+      "Ordered oldest-first; check the priority field for blocking messages. Own sends are not " +
+      "echoed back. Poll at turn open; use mark_seen on channel poll to clear unread.",
     inputSchema: pollSchema,
     handler: (client, a) =>
       client.poll({

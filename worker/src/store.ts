@@ -8,6 +8,11 @@ import {
   type MessageType,
   type Priority,
   CHANNELS,
+  MAX_BODY_BYTES,
+  MAX_REF_CHARS,
+  MAX_THREAD_ID_CHARS,
+  MAX_TO_ENTRIES,
+  MAX_TO_ENTRY_CHARS,
   isChannel,
   isMessageType,
   isPriority,
@@ -15,6 +20,7 @@ import {
   newId,
   nowIso,
   retentionCutoff,
+  utf8Bytes,
 } from "./bus-types";
 
 interface MessageRow {
@@ -53,12 +59,27 @@ function parseTo(value: unknown): string[] {
   if (!Array.isArray(value) || value.length === 0) {
     throw new BusError("to must be a non-empty array");
   }
+  if (value.length > MAX_TO_ENTRIES) {
+    throw new BusError(`to accepts at most ${MAX_TO_ENTRIES} recipients`);
+  }
   for (const item of value) {
     if (typeof item !== "string" || !item.trim()) {
       throw new BusError("to entries must be non-empty strings");
     }
+    if (item.length > MAX_TO_ENTRY_CHARS) {
+      throw new BusError(`to entries are capped at ${MAX_TO_ENTRY_CHARS} chars`);
+    }
   }
   return value as string[];
+}
+
+function validateRefs(refs: MessageRefs | null | undefined): void {
+  if (!refs) return;
+  for (const [key, value] of Object.entries(refs)) {
+    if (typeof value === "string" && value.length > MAX_REF_CHARS) {
+      throw new BusError(`refs.${key} is capped at ${MAX_REF_CHARS} chars`);
+    }
+  }
 }
 
 export interface SendInput {
@@ -91,6 +112,10 @@ export async function sendMessage(
   const to = parseTo(input.to);
   const body = String(input.body ?? "").trim();
   if (!body) throw new BusError("body is required");
+  if (utf8Bytes(body) > MAX_BODY_BYTES) {
+    throw new BusError(`body is capped at ${MAX_BODY_BYTES} bytes; link a gist/issue/PR for anything larger`);
+  }
+  validateRefs(input.refs);
 
   if (input.type === "ack" && !input.ack_of) {
     throw new BusError("ack messages require ack_of");
@@ -98,6 +123,9 @@ export async function sendMessage(
 
   const id = newId("msg");
   const thread_id = input.thread_id?.trim() || newId("thr");
+  if (thread_id.length > MAX_THREAD_ID_CHARS) {
+    throw new BusError(`thread_id is capped at ${MAX_THREAD_ID_CHARS} chars`);
+  }
   const created_at = nowIso();
   const requires_ack = input.requires_ack ? 1 : 0;
 
@@ -156,9 +184,11 @@ export async function getThread(db: D1Database, threadId: string, consumer: stri
     .bind(threadId)
     .all<MessageRow>();
 
+  // Senders see their own messages: a thread must reconstruct for the agent
+  // that started it, not just for the recipients.
   return (results ?? [])
     .map(rowToMessage)
-    .filter((m) => isVisibleTo(m.to, consumer));
+    .filter((m) => isVisibleTo(m.to, consumer) || m.from === consumer);
 }
 
 export async function pollMessages(
@@ -180,17 +210,32 @@ export async function pollMessages(
     binds.push(opts.channel);
   }
 
-  query += ` ORDER BY CASE priority WHEN 'blocking' THEN 0 ELSE 1 END, created_at ASC LIMIT ?`;
-  binds.push(limit + 50);
+  // Scan strictly in created_at order: the cursor is a time watermark, and any
+  // ordering that is not the watermark's own order (e.g. blocking-first) lets
+  // the cursor advance past rows that were never returned = silent message
+  // loss. Blocking priority stays visible as a field; callers scan for it.
+  const scanLimit = limit + 200;
+  query += ` ORDER BY created_at ASC, id ASC LIMIT ?`;
+  binds.push(scanLimit);
 
   const { results } = await db.prepare(query).bind(...binds).all<MessageRow>();
-  const visible = (results ?? [])
-    .map(rowToMessage)
-    .filter((m) => isVisibleTo(m.to, consumer))
-    .slice(0, limit);
+  const raw = (results ?? []).map(rowToMessage);
+  // Own sends are excluded from poll results (bus_send already returned them)
+  // but still advance the cursor below via the raw scan window.
+  const visible = raw.filter((m) => isVisibleTo(m.to, consumer) && m.from !== consumer);
+  const messages = visible.slice(0, limit);
 
-  const cursor = visible.length ? visible[visible.length - 1]!.created_at : null;
-  return { messages: visible, cursor };
+  // Lossless cursor: if the page truncated, stop at the last RETURNED message;
+  // otherwise every visible row in the scanned window was returned, so advance
+  // past the whole window (including invisible rows -- otherwise a flood of
+  // messages for other consumers would pin the cursor forever).
+  let cursor: string | null = null;
+  if (visible.length > limit) {
+    cursor = messages[messages.length - 1]!.created_at;
+  } else if (raw.length) {
+    cursor = raw[raw.length - 1]!.created_at;
+  }
+  return { messages, cursor };
 }
 
 async function unreadForChannel(db: D1Database, consumer: string, channel: Channel): Promise<number> {
@@ -201,12 +246,13 @@ async function unreadForChannel(db: D1Database, consumer: string, channel: Chann
 
   const since = cursorRow?.last_seen_at ?? "1970-01-01T00:00:00.000Z";
   const { results } = await db
-    .prepare(`SELECT to_json, created_at FROM messages WHERE channel = ? AND created_at > ?`)
+    .prepare(`SELECT from_consumer, to_json, created_at FROM messages WHERE channel = ? AND created_at > ?`)
     .bind(channel, since)
-    .all<{ to_json: string; created_at: string }>();
+    .all<{ from_consumer: string; to_json: string; created_at: string }>();
 
   let count = 0;
   for (const row of results ?? []) {
+    if (row.from_consumer === consumer) continue; // own sends are implicitly seen
     const to = JSON.parse(row.to_json) as string[];
     if (isVisibleTo(to, consumer)) count++;
   }
@@ -274,14 +320,14 @@ export async function markChannelSeenLatest(
   if (!isChannel(channel)) throw new BusError(`invalid channel: ${channel}`);
 
   const { results } = await db
-    .prepare(`SELECT to_json, created_at FROM messages WHERE channel = ? ORDER BY created_at DESC`)
+    .prepare(`SELECT from_consumer, to_json, created_at FROM messages WHERE channel = ? ORDER BY created_at DESC`)
     .bind(channel)
-    .all<{ to_json: string; created_at: string }>();
+    .all<{ from_consumer: string; to_json: string; created_at: string }>();
 
   let lastSeenAt = nowIso();
   for (const row of results ?? []) {
     const to = JSON.parse(row.to_json) as string[];
-    if (isVisibleTo(to, consumer)) {
+    if (isVisibleTo(to, consumer) || row.from_consumer === consumer) {
       lastSeenAt = row.created_at;
       break;
     }

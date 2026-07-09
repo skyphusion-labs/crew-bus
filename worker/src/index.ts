@@ -2,6 +2,7 @@ import type { Env } from "./env";
 import { handleApi } from "./api";
 import { handleMcp } from "./mcp";
 import { purgeExpired } from "./store";
+import { VERSION } from "./version";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -16,7 +17,7 @@ export default {
     const { pathname } = url;
 
     if (pathname === "/health") {
-      return json({ ok: true, service: "crew-bus", version: "0.1.0" });
+      return json({ ok: true, service: "crew-bus", version: VERSION });
     }
 
     if (pathname === "/mcp") {
