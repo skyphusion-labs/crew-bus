@@ -132,39 +132,39 @@ export function makeFakeD1(state: FakeD1State = { messages: [], cursors: [], ack
             .sort((a, b) => a.created_at.localeCompare(b.created_at));
           return { results: rows as T[] };
         }
-        if (/SELECT to_json, created_at FROM messages WHERE channel = \? ORDER BY created_at DESC/i.test(sql)) {
+        if (/SELECT from_consumer, to_json, created_at FROM messages WHERE channel = \? ORDER BY created_at DESC/i.test(sql)) {
           const channel = bound[0] as string;
           const rows = state.messages
             .filter((m) => m.channel === channel)
             .sort((a, b) => b.created_at.localeCompare(a.created_at))
-            .map((m) => ({ to_json: m.to_json, created_at: m.created_at }));
+            .map((m) => ({ from_consumer: m.from_consumer, to_json: m.to_json, created_at: m.created_at }));
           return { results: rows as T[] };
         }
-        if (/SELECT to_json, created_at FROM messages WHERE channel = \? AND created_at > \?/i.test(sql)) {
+        if (/SELECT from_consumer, to_json, created_at FROM messages WHERE channel = \? AND created_at > \?/i.test(sql)) {
           const [channel, since] = bound as [string, string];
           const rows = state.messages
             .filter((m) => m.channel === channel && m.created_at > since)
-            .map((m) => ({ to_json: m.to_json, created_at: m.created_at }));
+            .map((m) => ({ from_consumer: m.from_consumer, to_json: m.to_json, created_at: m.created_at }));
           return { results: rows as T[] };
         }
         if (/SELECT \* FROM messages WHERE created_at > \?/i.test(sql) && /channel = \?/i.test(sql)) {
-          const [since, channel] = bound as [string, string];
-          const rows = filterPollRows(state.messages, since, channel, true);
+          const [since, channel, limit] = bound as [string, string, number];
+          const rows = filterPollRows(state.messages, since, channel, true, limit);
           return { results: rows as T[] };
         }
         if (/SELECT \* FROM messages WHERE created_at >= COALESCE/i.test(sql) && /channel = \?/i.test(sql)) {
-          const [since, channel] = bound as [string | null, string];
-          const rows = filterPollRows(state.messages, since ?? "1970-01-01T00:00:00.000Z", channel, false);
+          const [since, channel, limit] = bound as [string | null, string, number];
+          const rows = filterPollRows(state.messages, since ?? "1970-01-01T00:00:00.000Z", channel, false, limit);
           return { results: rows as T[] };
         }
         if (/SELECT \* FROM messages WHERE created_at > \?/i.test(sql)) {
-          const [since] = bound as [string];
-          const rows = filterPollRows(state.messages, since, undefined, true);
+          const [since, limit] = bound as [string, number];
+          const rows = filterPollRows(state.messages, since, undefined, true, limit);
           return { results: rows as T[] };
         }
         if (/SELECT \* FROM messages WHERE created_at >= COALESCE/i.test(sql)) {
-          const [since] = bound as [string | null];
-          const rows = filterPollRows(state.messages, since ?? "1970-01-01T00:00:00.000Z", undefined, false);
+          const [since, limit] = bound as [string | null, number];
+          const rows = filterPollRows(state.messages, since ?? "1970-01-01T00:00:00.000Z", undefined, false, limit);
           return { results: rows as T[] };
         }
         return { results: [] as T[] };
@@ -179,21 +179,21 @@ export function makeFakeD1(state: FakeD1State = { messages: [], cursors: [], ack
   } as unknown as D1Database;
 }
 
+// Mirrors the store's poll SQL: pure (created_at, id) ordering with the scan
+// LIMIT applied, so cursor-loss regressions are testable here.
 function filterPollRows(
   messages: MessageRow[],
   since: string,
   channel: string | undefined,
   exclusive: boolean,
+  limit?: number,
 ): MessageRow[] {
   let rows = messages.filter((m) =>
     exclusive ? m.created_at > since : m.created_at >= since,
   );
   if (channel) rows = rows.filter((m) => m.channel === channel);
-  rows.sort((a, b) => {
-    const pa = a.priority === "blocking" ? 0 : 1;
-    const pb = b.priority === "blocking" ? 0 : 1;
-    if (pa !== pb) return pa - pb;
-    return a.created_at.localeCompare(b.created_at);
-  });
-  return rows;
+  rows.sort(
+    (a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id),
+  );
+  return typeof limit === "number" ? rows.slice(0, limit) : rows;
 }

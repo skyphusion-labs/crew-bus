@@ -51,6 +51,18 @@ export function isVisibleTo(to: string[], consumer: string): boolean {
   return to.includes("*") || to.includes(consumer);
 }
 
+// Input caps: both crews are LLM agents, so an oversized message lands in a
+// model context on poll. Bound the write side rather than truncating reads.
+export const MAX_BODY_BYTES = 16384;
+export const MAX_TO_ENTRIES = 16;
+export const MAX_TO_ENTRY_CHARS = 64;
+export const MAX_THREAD_ID_CHARS = 128;
+export const MAX_REF_CHARS = 512;
+
+export function utf8Bytes(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
 export function newId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "")}`;
 }
