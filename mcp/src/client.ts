@@ -23,6 +23,8 @@ export class CrewBusClient {
   private readonly timeoutMs: number;
   private readonly connectIp?: string;
   private readonly tlsServername?: string;
+  // #22: in-process guard against duplicate acks per message_id.
+  private readonly ackInFlight = new Map<string, Promise<unknown>>();
 
   constructor(baseUrl: string, token: string, opts: ClientOptions = {}) {
     this.base = baseUrl.replace(/\/+$/, "");
@@ -152,7 +154,16 @@ export class CrewBusClient {
   }
 
   ack(messageId: string, body?: string) {
-    return this.request("POST", "/api/ack", { message_id: messageId, body });
+    // #22: a single logical ack was observed arriving 3x then 8x from a
+    // retry/timeout path. Collapse repeats for one message_id onto a single
+    // in-flight request and reuse its result; on failure drop the cache entry
+    // so a genuine retry can still proceed.
+    const cached = this.ackInFlight.get(messageId);
+    if (cached) return cached;
+    const p = this.request("POST", "/api/ack", { message_id: messageId, body });
+    this.ackInFlight.set(messageId, p);
+    p.catch(() => this.ackInFlight.delete(messageId));
+    return p;
   }
 
   channels() {
