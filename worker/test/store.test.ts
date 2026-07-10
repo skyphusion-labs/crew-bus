@@ -363,4 +363,35 @@ describe("store", () => {
     expect(channels.find((c) => c.channel === "fleet")!.pending_ack).toBe(0);
   });
 
+  it("ack is idempotent: repeats keep one row, first acked_at, one ack message (#22)", async () => {
+    const db = makeFakeD1();
+    const roster = ["mackaye", "cursor-laptop"];
+    const sent = await sendMessage(
+      db,
+      "mackaye",
+      { channel: "vivijure", to: ["cursor-laptop"], type: "handoff", body: "pick up", requires_ack: true },
+      roster,
+    );
+    await pollMessages(db, "cursor-laptop", { channel: "vivijure" });
+
+    const first = await ackMessage(db, "cursor-laptop", sent.id, "on it");
+    await new Promise((r) => setTimeout(r, 2));
+    const second = await ackMessage(db, "cursor-laptop", sent.id, "on it again");
+    const third = await ackMessage(db, "cursor-laptop", sent.id);
+
+    // Every repeat returns the FIRST ack unchanged (true no-op).
+    expect(second.id).toBe(first.id);
+    expect(third.id).toBe(first.id);
+    expect(second.body).toBe(first.body);
+
+    const thread = await getThread(db, sent.thread_id, "mackaye", roster);
+    const handoff = thread.find((m) => m.id === sent.id)!;
+    // Delivery report: a single ack, acked_at is the FIRST ack time.
+    expect(handoff.delivery).toEqual([
+      { recipient: "cursor-laptop", acked_at: first.created_at, polled_after: true },
+    ]);
+    // Exactly one ack-type message landed in the thread.
+    expect(thread.filter((m) => m.type === "ack")).toHaveLength(1);
+  });
+
 });
