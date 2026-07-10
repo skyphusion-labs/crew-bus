@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# End-to-end smoke against a live crew-bus Worker (local wrangler dev or bus-internal.skyphusion.org).
+# End-to-end smoke against a live crew-bus Worker (local wrangler dev or your deployed URL).
 set -euo pipefail
 
 API_URL="${CREW_BUS_API_URL:-http://localhost:8787}"
 TOKEN="${CREW_BUS_API_TOKEN:?CREW_BUS_API_TOKEN is required}"
-# Optional: e.g. --resolve 'bus-internal.skyphusion.org:443:104.21.22.24' when split-DNS breaks curl.
+# Optional: e.g. --resolve 'crew-bus.example.com:443:<ip>' when split-DNS breaks curl.
 CURL_EXTRA=(${CREW_BUS_CURL_RESOLVE:-})
 
 auth=(-H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json")

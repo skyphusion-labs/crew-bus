@@ -5,7 +5,14 @@ name: deploy
 # /health drift was only findable because deploys were hand-run).
 #
 # Trigger: push a SemVer tag (v0.1.2) on a main commit, or workflow_dispatch.
-# Secrets: CLOUDFLARE_API_TOKEN (scoped crew-bus-ci token), CLOUDFLARE_ACCOUNT_ID.
+# Secrets:
+#   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID — scoped crew-bus-ci token
+#   SKYPHUSION_WRANGLER_TOML — production wrangler.toml blob (never committed)
+#   CREW_BUS_HEALTH_URL — full /health URL for post-deploy version verify
+#
+# Tag namespaces (do not confuse):
+#   v*           → this workflow (Worker deploy)
+#   crew-bus-v*  → publish-npm.yml (@skyphusion/crew-bus)
 
 on:
   push:
@@ -21,7 +28,7 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, fleet]
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: worker
@@ -37,18 +44,26 @@ jobs:
         run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: Materialize production wrangler.toml
+        working-directory: .
+        env:
+          SKYPHUSION_WRANGLER_TOML: ${{ secrets.SKYPHUSION_WRANGLER_TOML }}
+        run: node scripts/materialize-config.mjs
       - name: Deploy Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy
       - name: Verify served version matches the release
+        env:
+          CREW_BUS_HEALTH_URL: ${{ secrets.CREW_BUS_HEALTH_URL }}
         run: |
+          : "${CREW_BUS_HEALTH_URL:?CREW_BUS_HEALTH_URL secret is required}"
           WANT=$(node -e "console.log(require('./package.json').version)")
           # Edge propagation lags the API call; poll up to 2 min (first tag run
           # caught 0.1.0 five seconds after a successful 0.1.2 deploy).
           for i in $(seq 1 24); do
-            SERVED=$(curl -sS https://bus-internal.skyphusion.org/health | node -e "process.stdin.on('data',d=>console.log(JSON.parse(d).version))")
+            SERVED=$(curl -sS "$CREW_BUS_HEALTH_URL" | node -e "process.stdin.on('data',d=>console.log(JSON.parse(d).version))")
             echo "attempt $i: served=$SERVED want=$WANT"
             [ "$SERVED" = "$WANT" ] && exit 0
             sleep 5

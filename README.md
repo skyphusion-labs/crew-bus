@@ -90,6 +90,19 @@ export CREW_BUS_API_TOKEN=<your-consumer-token>
 - Default channels: `vivijure`, `postern`, `common-thread`, `fleet`, `general` (edit in Worker source if needed)
 - Broadcast: `to: ["*"]`; retention: 30 days (daily cron purge); no rate limits in v1
 
+## Releases (two tag namespaces)
+
+| Tag | Workflow | What it does |
+| --- | --- | --- |
+| `v0.1.2` | `deploy.yml` | Deploy the Cloudflare Worker |
+| `crew-bus-v0.1.2` | `publish-npm.yml` | Publish `@skyphusion/crew-bus` to npm |
+
+Do not use a `v*` tag expecting an npm publish, or a `crew-bus-v*` tag expecting a Worker deploy.
+
+Production `wrangler.toml` is **not** in git. CI materializes it from Actions secret
+`SKYPHUSION_WRANGLER_TOML` (`scripts/materialize-config.mjs`). Local operators: copy
+`worker/wrangler.toml.example` → `worker/wrangler.toml`.
+
 ## Public release
 
 Repo flip + npm publish checklist: [docs/PUBLIC-RELEASE.md](./docs/PUBLIC-RELEASE.md) (post-canary).

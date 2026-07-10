@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   coverage:
-    runs-on: [self-hosted, fleet]
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: worker
