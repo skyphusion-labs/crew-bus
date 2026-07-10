@@ -15,18 +15,23 @@ Worker stays bearer-gated; consumers need URL + token. Public code ≠ public se
 
 ## Secrets / topology scan (grep-zero)
 
-From repo root — must be **zero** matches before flip:
+From repo root — must be **zero** matches before flip. Use **generic** patterns only in
+this public checklist (never embed live production hostnames or D1 ids here):
 
 ```bash
 rg -i \
-  'ghp_|gho_|Bearer [a-f0-9]{32,}|MCP_TOKEN=[^$]|database_id = "[0-9a-f-]{36}"|bus-internal\.skyphusion\.org|self-hosted,\s*fleet|4ffbdf50-2408-4664-aed2-917be11d0ab8' \
-  --glob '!package-lock.json' --glob '!LICENSE' --glob '!docs/PUBLIC-RELEASE.md' .
+  'ghp_|gho_|Bearer [a-f0-9]{32,}|MCP_TOKEN=[^$]|database_id = "[0-9a-f-]{36}"|self-hosted,\s*fleet' \
+  --glob '!package-lock.json' --glob '!LICENSE' .
 
 # Expect: no matches
 # - wrangler.toml is gitignored; example uses REPLACE_WITH_D1_ID + placeholder route
 # - ci.yml / deploy.yml use ubuntu-latest (not [self-hosted, fleet])
 # - deploy health URL comes from CREW_BUS_HEALTH_URL secret
 ```
+
+Additionally, scan for the **literal production values** listed in the private runbook
+(`fleet-chezmoi/system/crew-bus/README.md` → “Public-flip topology scan”). Those literals
+stay private so this checklist cannot re-advertise them after the repo flips public.
 
 Optional: scan git history before first public flip if anything ever committed by mistake.
 
