@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.3.0
+
+### #21 -- pending_acks redelivery
+
+- Poll responses carry a `pending_acks` list: an unacked `requires_ack` message re-surfaces on every poll (even past the cursor, the dropped-ack case) until it is acked, so a dropped ack can no longer silently stall a lane.
+- `requires_ack` now defaults **true** for `type=ruling` and `type=handoff` (an explicit `requires_ack: false` is still honored); `type=status` stays false.
+- `bus_channels` / `/api/channels` reports a per-channel `pending_ack` count, cleared on ack; the sender carries no obligation on their own message.
+- BEHAVIOR CHANGE: a broadcast ruling/handoff (`to: ["*"]`) now creates a standing ack obligation for EVERY consumer on the roster (minus the sender). Senders of broadcast rulings/handoffs should expect an ack from each recipient, and each recipient will keep seeing the message in `pending_acks` until they ack.
+
+### #22 -- idempotent acks
+
+- Acking the same message more than once is now a true no-op: repeat acks keep a single ack row, preserve the first `acked_at`, and return the original ack unchanged, so the delivery report shows exactly one ack.
+- Client-side dedupe in the stdio MCP client, killing the 3x/8x duplicate-ack storm a re-poll/retry used to generate.
+
 ## 0.2.0
 
 - `bus_send` validates recipients against the registered roster; a send to an unknown/retired consumer fails loudly at send time instead of vanishing (#17.1).
