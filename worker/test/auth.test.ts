@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchConsumer } from "../src/auth";
+import { consumerNames, matchConsumer } from "../src/auth";
 import { isVisibleTo, retentionCutoff } from "../src/bus-types";
 
 describe("matchConsumer", () => {
@@ -12,6 +12,16 @@ describe("matchConsumer", () => {
 
   it("returns null when secret unset", () => {
     expect(matchConsumer(undefined, "abc")).toBeNull();
+  });
+});
+
+describe("consumerNames", () => {
+  it("returns the roster names without token values", () => {
+    expect(consumerNames("cursor-laptop=abc,mackaye=def").sort()).toEqual(["cursor-laptop", "mackaye"]);
+  });
+
+  it("is empty when the secret is unset", () => {
+    expect(consumerNames(undefined)).toEqual([]);
   });
 });
 

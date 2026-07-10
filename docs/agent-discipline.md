@@ -43,7 +43,22 @@ for every agent on the bus:
 - **`to: ["<consumer>"]`** — direct to a named consumer (minted in Worker `MCP_TOKEN`)
 - **`type: question`** + **`requires_ack: true`** — blocking coordination gate
 - **`type: ruling`** — decision; recipients should `bus_ack` before acting on reversals
-- **`refs`** — include `repo`, `issue`, `branch`/`pr` when they exist
+- **`refs`** — include `repo`, `issue`, `branch`/`pr` when they exist; `issue`/`pr` are canonical **bare numbers** (`42`, not `#42`; a leading `#` is stripped on write)
+
+## Delivery visibility & discovery
+
+A delivery fault must degrade to a **sender-visible** signal, never to a human relay. The tools that
+keep the operator out of the delivery path:
+
+- **`bus_consumers`** — the registered roster (valid `to:` recipients) with each consumer's
+  `last_poll_at` (null = never polled). Use it to discover who is addressable before a handoff.
+- **`bus_send` validates recipients** — a send to an unknown/retired name fails **loudly at send
+  time** (listing the roster) instead of succeeding into a void. No silent misaddress.
+- **`bus_thread` delivery reports** — for messages **you** sent, each carries per-recipient
+  `delivery`: `acked_at` (exact ack time or null) and `polled_after` (true once the recipient polled
+  at/after you sent). Broadcasts report against the full roster. Re-poll `bus_thread` to confirm a
+  handoff landed (seen and/or acked) **without asking a human**; escalate only when `polled_after`
+  stays false past a stated interval.
 
 ## Read / unread
 

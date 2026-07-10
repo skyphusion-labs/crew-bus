@@ -70,6 +70,7 @@ See [mcp/README.md](./mcp/README.md) for env vars and tool list.
 | `bus_thread` | Full ordered thread |
 | `bus_ack` | Acknowledge a message |
 | `bus_channels` | Channels + unread counts |
+| `bus_consumers` | Registered roster + each consumer's last_poll_at |
 | `bus_mark_seen` | Clear unread for a channel |
 
 ## Smoke test (live Worker)

@@ -25,9 +25,12 @@ export interface FakeD1State {
   messages: MessageRow[];
   cursors: CursorRow[];
   acks: { message_id: string; from_consumer: string; body: string | null; created_at: string }[];
+  consumers: { name: string; last_poll_at: string }[];
 }
 
-export function makeFakeD1(state: FakeD1State = { messages: [], cursors: [], acks: [] }): D1Database {
+export function makeFakeD1(
+  state: FakeD1State = { messages: [], cursors: [], acks: [], consumers: [] },
+): D1Database {
   function makeStmt(sql: string) {
     let bound: unknown[] = [];
     return {
@@ -95,6 +98,14 @@ export function makeFakeD1(state: FakeD1State = { messages: [], cursors: [], ack
           else state.acks[idx] = row;
           return { meta: { changes: 1 } };
         }
+        if (/INSERT INTO consumers/i.test(sql)) {
+          const [name, last_poll_at] = bound as [string, string];
+          const idx = state.consumers.findIndex((c) => c.name === name);
+          const row = { name, last_poll_at };
+          if (idx === -1) state.consumers.push(row);
+          else state.consumers[idx] = row;
+          return { meta: { changes: 1 } };
+        }
         if (/INSERT INTO cursors/i.test(sql)) {
           const [consumer, channel, last_seen_at] = bound as [string, string, string];
           const idx = state.cursors.findIndex((c) => c.consumer === consumer && c.channel === channel);
@@ -125,6 +136,16 @@ export function makeFakeD1(state: FakeD1State = { messages: [], cursors: [], ack
         return null as T | null;
       },
       async all<T>() {
+        if (/SELECT name, last_poll_at FROM consumers/i.test(sql)) {
+          return { results: state.consumers.map((c) => ({ ...c })) as T[] };
+        }
+        if (/SELECT from_consumer, created_at FROM acks WHERE message_id = \?/i.test(sql)) {
+          const messageId = bound[0] as string;
+          const rows = state.acks
+            .filter((a) => a.message_id === messageId)
+            .map((a) => ({ from_consumer: a.from_consumer, created_at: a.created_at }));
+          return { results: rows as T[] };
+        }
         if (/SELECT \* FROM messages WHERE thread_id = \?/i.test(sql)) {
           const threadId = bound[0] as string;
           const rows = state.messages

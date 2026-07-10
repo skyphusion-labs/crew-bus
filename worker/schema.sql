@@ -33,3 +33,11 @@ CREATE TABLE IF NOT EXISTS acks (
   created_at TEXT NOT NULL,
   PRIMARY KEY (message_id, from_consumer)
 );
+
+-- Consumer discovery + delivery visibility (fc#427 / #17). last_poll_at is
+-- upserted on each authenticated bus_poll; powers bus_consumers and the
+-- polled_after signal in bus_thread delivery reports.
+CREATE TABLE IF NOT EXISTS consumers (
+  name TEXT PRIMARY KEY,
+  last_poll_at TEXT
+);

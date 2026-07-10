@@ -4,9 +4,12 @@ import {
   type BusMessage,
   type Channel,
   type ChannelSummary,
+  type ConsumerStatus,
   type MessageRefs,
   type MessageType,
   type Priority,
+  type RecipientDelivery,
+  type ThreadMessage,
   CHANNELS,
   MAX_BODY_BYTES,
   MAX_REF_CHARS,
@@ -73,6 +76,22 @@ function parseTo(value: unknown): string[] {
   return value as string[];
 }
 
+// Root-defect fix (#17.1): a send to an unknown/retired name must fail LOUDLY
+// at send time, not succeed into a void. `known` is the registered roster
+// (NAMES only, never tokens). "*" is always valid. When `known` is undefined
+// (internal calls, e.g. ack replies) validation is skipped.
+function validateRecipients(to: string[], known: string[] | undefined): void {
+  if (!known) return;
+  const unknown = to.filter((t) => t !== "*" && !known.includes(t));
+  if (unknown.length) {
+    throw new BusError(
+      `unknown recipient(s): ${unknown.join(", ")}. valid consumers: ${
+        known.join(", ") || "(none registered)"
+      } (or "*" to broadcast)`,
+    );
+  }
+}
+
 function validateRefs(refs: MessageRefs | null | undefined): void {
   if (!refs) return;
   for (const [key, value] of Object.entries(refs)) {
@@ -80,6 +99,16 @@ function validateRefs(refs: MessageRefs | null | undefined): void {
       throw new BusError(`refs.${key} is capped at ${MAX_REF_CHARS} chars`);
     }
   }
+}
+
+// refs normalization (#17.4): issue / pr are canonical BARE numbers. Strip a
+// leading "#" at write time so refs.issue "#42" and "42" store identically.
+function normalizeRefs(refs: MessageRefs | null | undefined): MessageRefs | null {
+  if (!refs) return refs ?? null;
+  const out: MessageRefs = { ...refs };
+  if (typeof out.issue === "string") out.issue = out.issue.replace(/^#/, "");
+  if (typeof out.pr === "string") out.pr = out.pr.replace(/^#/, "");
+  return out;
 }
 
 export interface SendInput {
@@ -98,6 +127,7 @@ export async function sendMessage(
   db: D1Database,
   from: string,
   input: SendInput,
+  knownConsumers?: string[],
 ): Promise<BusMessage> {
   if (!isChannel(input.channel)) {
     throw new BusError(`invalid channel: ${input.channel}`);
@@ -110,12 +140,14 @@ export async function sendMessage(
     throw new BusError(`invalid priority: ${priority}`);
   }
   const to = parseTo(input.to);
+  validateRecipients(to, knownConsumers);
   const body = String(input.body ?? "").trim();
   if (!body) throw new BusError("body is required");
   if (utf8Bytes(body) > MAX_BODY_BYTES) {
     throw new BusError(`body is capped at ${MAX_BODY_BYTES} bytes; link a gist/issue/PR for anything larger`);
   }
   validateRefs(input.refs);
+  const refs = normalizeRefs(input.refs);
 
   if (input.type === "ack" && !input.ack_of) {
     throw new BusError("ack messages require ack_of");
@@ -144,7 +176,7 @@ export async function sendMessage(
       input.type,
       priority,
       body,
-      input.refs ? JSON.stringify(input.refs) : null,
+      refs ? JSON.stringify(refs) : null,
       requires_ack,
       input.ack_of ?? null,
       created_at,
@@ -171,14 +203,22 @@ export async function sendMessage(
     type: input.type,
     priority,
     body,
-    refs: input.refs ?? null,
+    refs,
     requires_ack: Boolean(requires_ack),
     ack_of: input.ack_of ?? null,
     created_at,
   };
 }
 
-export async function getThread(db: D1Database, threadId: string, consumer: string): Promise<BusMessage[]> {
+// Sender-side delivery visibility (#17.3): for messages the CALLER sent, attach
+// a per-recipient delivery report so a parked handoff is self-diagnosable in one
+// call, with no human in the loop. Broadcasts report against the full roster.
+export async function getThread(
+  db: D1Database,
+  threadId: string,
+  consumer: string,
+  knownConsumers: string[] = [],
+): Promise<ThreadMessage[]> {
   const { results } = await db
     .prepare(`SELECT * FROM messages WHERE thread_id = ? ORDER BY created_at ASC`)
     .bind(threadId)
@@ -186,9 +226,66 @@ export async function getThread(db: D1Database, threadId: string, consumer: stri
 
   // Senders see their own messages: a thread must reconstruct for the agent
   // that started it, not just for the recipients.
-  return (results ?? [])
+  const visible = (results ?? [])
     .map(rowToMessage)
     .filter((m) => isVisibleTo(m.to, consumer) || m.from === consumer);
+
+  const own = visible.filter((m) => m.from === consumer && m.type !== "ack");
+  if (own.length === 0) return visible;
+
+  // last_poll_at per registered consumer (single read for the whole thread).
+  const { results: pollRows } = await db
+    .prepare(`SELECT name, last_poll_at FROM consumers`)
+    .all<{ name: string; last_poll_at: string | null }>();
+  const pollMap = new Map((pollRows ?? []).map((r) => [r.name, r.last_poll_at] as const));
+
+  const out: ThreadMessage[] = [];
+  for (const m of visible) {
+    if (m.from !== consumer || m.type === "ack") {
+      out.push(m);
+      continue;
+    }
+    const recipients = (m.to.includes("*") ? knownConsumers : m.to).filter((r) => r !== consumer);
+    const { results: ackRows } = await db
+      .prepare(`SELECT from_consumer, created_at FROM acks WHERE message_id = ?`)
+      .bind(m.id)
+      .all<{ from_consumer: string; created_at: string }>();
+    const ackMap = new Map((ackRows ?? []).map((r) => [r.from_consumer, r.created_at] as const));
+
+    const delivery: RecipientDelivery[] = recipients.map((r) => {
+      const lastPoll = pollMap.get(r) ?? null;
+      return {
+        recipient: r,
+        acked_at: ackMap.get(r) ?? null,
+        polled_after: lastPoll !== null && lastPoll >= m.created_at,
+      };
+    });
+    out.push({ ...m, delivery });
+  }
+  return out;
+}
+
+// Upserted on each authenticated poll so bus_consumers + delivery reports have a
+// last_poll_at watermark. One cheap write per poll at our volume.
+export async function recordPoll(db: D1Database, consumer: string): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO consumers (name, last_poll_at)
+       VALUES (?, ?)
+       ON CONFLICT(name) DO UPDATE SET last_poll_at = excluded.last_poll_at`,
+    )
+    .bind(consumer, nowIso())
+    .run();
+}
+
+// Consumer discovery (#17.2): the registered roster (from the token map) joined
+// with each consumer's last_poll_at. Names with no poll row yet return null.
+export async function listConsumers(db: D1Database, names: string[]): Promise<ConsumerStatus[]> {
+  const { results } = await db
+    .prepare(`SELECT name, last_poll_at FROM consumers`)
+    .all<{ name: string; last_poll_at: string | null }>();
+  const pollMap = new Map((results ?? []).map((r) => [r.name, r.last_poll_at] as const));
+  return names.map((name) => ({ name, last_poll_at: pollMap.get(name) ?? null }));
 }
 
 export async function pollMessages(
@@ -196,6 +293,7 @@ export async function pollMessages(
   consumer: string,
   opts: { channel?: string; since?: string; limit?: number },
 ): Promise<{ messages: BusMessage[]; cursor: string | null }> {
+  await recordPoll(db, consumer);
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
   // Exclusive since: pass the prior poll's cursor as `since` to avoid duplicates.
   const sinceClause = opts.since
@@ -284,6 +382,8 @@ export async function ackMessage(
     throw new BusError("not authorized to ack this message");
   }
 
+  // Ack replies address the original sender (a prior participant by definition),
+  // so recipient validation is intentionally skipped here.
   return sendMessage(db, from, {
     channel: original.channel,
     thread_id: original.thread_id,

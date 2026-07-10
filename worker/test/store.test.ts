@@ -3,6 +3,7 @@ import {
   ackMessage,
   getThread,
   listChannels,
+  listConsumers,
   markChannelSeenLatest,
   pollMessages,
   sendMessage,
@@ -200,4 +201,101 @@ describe("store", () => {
     const page = await pollMessages(db, "strummer", { channel: "postern" });
     expect(page.messages).toHaveLength(0);
   });
+  it("rejects a send to an unknown/retired recipient, listing the roster (#17.1)", async () => {
+    const db = makeFakeD1();
+    const roster = ["mackaye", "strummer"];
+
+    await expect(
+      sendMessage(
+        db,
+        "mackaye",
+        { channel: "vivijure", to: ["albini"], type: "handoff", body: "render this" },
+        roster,
+      ),
+    ).rejects.toThrow(/unknown recipient\(s\): albini.*valid consumers: mackaye, strummer/);
+
+    // A registered name and a broadcast both pass validation.
+    await expect(
+      sendMessage(db, "mackaye", { channel: "vivijure", to: ["strummer"], type: "handoff", body: "ok" }, roster),
+    ).resolves.toBeTruthy();
+    await expect(
+      sendMessage(db, "mackaye", { channel: "general", to: ["*"], type: "ping", body: "all" }, roster),
+    ).resolves.toBeTruthy();
+  });
+
+  it("normalizes refs.issue / refs.pr to bare numbers (#17.4)", async () => {
+    const db = makeFakeD1();
+    const sent = await sendMessage(db, "mackaye", {
+      channel: "vivijure",
+      to: ["*"],
+      type: "status",
+      body: "see refs",
+      refs: { repo: "crew-bus", issue: "#42", pr: "#17", branch: "feat/x" },
+    });
+    expect(sent.refs).toEqual({ repo: "crew-bus", issue: "42", pr: "17", branch: "feat/x" });
+
+    const thread = await getThread(db, sent.thread_id, "mackaye", ["mackaye"]);
+    expect(thread[0]!.refs).toEqual({ repo: "crew-bus", issue: "42", pr: "17", branch: "feat/x" });
+  });
+
+  it("bus_consumers roster reports last_poll_at, null before a poll (#17.2)", async () => {
+    const db = makeFakeD1();
+    const roster = ["mackaye", "cursor-laptop"];
+
+    let consumers = await listConsumers(db, roster);
+    expect(consumers).toEqual([
+      { name: "mackaye", last_poll_at: null },
+      { name: "cursor-laptop", last_poll_at: null },
+    ]);
+
+    await pollMessages(db, "cursor-laptop", { channel: "general" });
+    consumers = await listConsumers(db, roster);
+    expect(consumers.find((c) => c.name === "mackaye")!.last_poll_at).toBeNull();
+    expect(consumers.find((c) => c.name === "cursor-laptop")!.last_poll_at).not.toBeNull();
+  });
+
+  it("thread attaches sender-side delivery: polled_after then acked_at (#17.3)", async () => {
+    const db = makeFakeD1();
+    const roster = ["mackaye", "cursor-laptop"];
+
+    const sent = await sendMessage(
+      db,
+      "mackaye",
+      { channel: "vivijure", to: ["cursor-laptop"], type: "handoff", body: "pick this up", requires_ack: true },
+      roster,
+    );
+
+    // Before the recipient polls: addressed but not yet seen or acked.
+    let thread = await getThread(db, sent.thread_id, "mackaye", roster);
+    let delivery = thread.find((m) => m.id === sent.id)!.delivery!;
+    expect(delivery).toEqual([{ recipient: "cursor-laptop", acked_at: null, polled_after: false }]);
+
+    // Recipient polls (records last_poll_at), then acks.
+    await new Promise((r) => setTimeout(r, 2));
+    await pollMessages(db, "cursor-laptop", { channel: "vivijure" });
+    await ackMessage(db, "cursor-laptop", sent.id, "on it");
+
+    thread = await getThread(db, sent.thread_id, "mackaye", roster);
+    delivery = thread.find((m) => m.id === sent.id)!.delivery!;
+    expect(delivery[0]!.recipient).toBe("cursor-laptop");
+    expect(delivery[0]!.polled_after).toBe(true);
+    expect(delivery[0]!.acked_at).not.toBeNull();
+  });
+
+  it("broadcast delivery reports against the full roster minus the sender (#17.3)", async () => {
+    const db = makeFakeD1();
+    const roster = ["mackaye", "cursor-laptop", "strummer"];
+
+    const sent = await sendMessage(
+      db,
+      "mackaye",
+      { channel: "general", to: ["*"], type: "status", body: "heads up all" },
+      roster,
+    );
+
+    const thread = await getThread(db, sent.thread_id, "mackaye", roster);
+    const delivery = thread.find((m) => m.id === sent.id)!.delivery!;
+    expect(delivery.map((d) => d.recipient).sort()).toEqual(["cursor-laptop", "strummer"]);
+  });
+
 });

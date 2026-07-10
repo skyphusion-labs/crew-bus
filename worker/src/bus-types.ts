@@ -82,3 +82,23 @@ export function retentionCutoff(env: { RETENTION_DAYS?: string }): string {
   d.setUTCDate(d.getUTCDate() - days);
   return d.toISOString();
 }
+
+/** Per-recipient delivery signal for a message the caller sent (bus_thread). */
+export interface RecipientDelivery {
+  recipient: string;
+  /** Exact ack time from the acks table, or null if not yet acked. */
+  acked_at: string | null;
+  /** True when the recipient ran a poll at or after this message was created. */
+  polled_after: boolean;
+}
+
+/** A thread message; `delivery` is present only for messages the caller sent. */
+export interface ThreadMessage extends BusMessage {
+  delivery?: RecipientDelivery[];
+}
+
+/** Registered consumer + last poll time (null if never polled). bus_consumers. */
+export interface ConsumerStatus {
+  name: string;
+  last_poll_at: string | null;
+}

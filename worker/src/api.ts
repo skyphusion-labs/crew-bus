@@ -1,11 +1,12 @@
 import type { Env } from "./env";
-import { bearerToken, json, matchConsumer, requireConsumer } from "./auth";
+import { bearerToken, consumerNames, json, matchConsumer, requireConsumer } from "./auth";
 import { BusError, clientErrorMessage } from "./bus-error";
 import { CHANNELS, isChannel } from "./bus-types";
 import {
   ackMessage,
   getThread,
   listChannels,
+  listConsumers,
   markChannelSeen,
   markChannelSeenLatest,
   pollMessages,
@@ -28,17 +29,22 @@ export async function handleApi(request: Request, env: Env, pathname: string): P
   try {
     if (pathname === "/api/send" && request.method === "POST") {
       const body = await readJson(request);
-      const message = await sendMessage(env.DB, consumer, {
-        channel: String(body.channel ?? ""),
-        thread_id: body.thread_id ? String(body.thread_id) : undefined,
-        to: body.to as string[],
-        type: String(body.type ?? ""),
-        priority: body.priority ? String(body.priority) : undefined,
-        body: String(body.body ?? ""),
-        refs: (body.refs as Record<string, unknown> | null | undefined) ?? null,
-        requires_ack: Boolean(body.requires_ack),
-        ack_of: body.ack_of ? String(body.ack_of) : null,
-      });
+      const message = await sendMessage(
+        env.DB,
+        consumer,
+        {
+          channel: String(body.channel ?? ""),
+          thread_id: body.thread_id ? String(body.thread_id) : undefined,
+          to: body.to as string[],
+          type: String(body.type ?? ""),
+          priority: body.priority ? String(body.priority) : undefined,
+          body: String(body.body ?? ""),
+          refs: (body.refs as Record<string, unknown> | null | undefined) ?? null,
+          requires_ack: Boolean(body.requires_ack),
+          ack_of: body.ack_of ? String(body.ack_of) : null,
+        },
+        consumerNames(env.MCP_TOKEN),
+      );
       return json({ ok: true, message });
     }
 
@@ -61,7 +67,7 @@ export async function handleApi(request: Request, env: Env, pathname: string): P
 
     if (pathname.startsWith("/api/thread/") && request.method === "GET") {
       const threadId = decodeURIComponent(pathname.slice("/api/thread/".length));
-      const messages = await getThread(env.DB, threadId, consumer);
+      const messages = await getThread(env.DB, threadId, consumer, consumerNames(env.MCP_TOKEN));
       return json({ ok: true, thread_id: threadId, count: messages.length, messages });
     }
 
@@ -76,6 +82,11 @@ export async function handleApi(request: Request, env: Env, pathname: string): P
     if (pathname === "/api/channels" && request.method === "GET") {
       const channels = await listChannels(env.DB, consumer);
       return json({ ok: true, consumer, channels });
+    }
+
+    if (pathname === "/api/consumers" && request.method === "GET") {
+      const consumers = await listConsumers(env.DB, consumerNames(env.MCP_TOKEN));
+      return json({ ok: true, consumers });
     }
 
     if (pathname === "/api/mark_seen" && request.method === "POST") {
