@@ -24,7 +24,8 @@ const TOOLS = [
       "Post a structured message to a crew-bus channel. Use to: [\"*\"] to broadcast. " +
       "Recipients are validated against the registered roster (bus_consumers): a send to an " +
       "unknown/retired name fails loudly rather than vanishing. Set requires_ack for coordination " +
-      "gates. Include refs (repo, issue, branch, pr) when relevant; refs.issue and refs.pr are " +
+      "gates; type=ruling and type=handoff default requires_ack=true (pass false to opt out). " +
+      "Include refs (repo, issue, branch, pr) when relevant; refs.issue and refs.pr are " +
       "canonical BARE numbers (\"42\", not \"#42\"; a leading # is stripped on write).",
     inputSchema: {
       type: "object",
@@ -60,7 +61,10 @@ const TOOLS = [
       "Fetch messages visible to the authenticated consumer since an ISO timestamp (exclusive: " +
       "pass the prior poll's cursor as since to avoid duplicates; a null cursor with an empty " +
       "channel means nothing new). Ordered oldest-first; check the priority field for blocking " +
-      "messages. Own sends are not echoed back. Poll at turn open and after asking blocking questions.",
+      "messages. Own sends are not echoed back. Poll at turn open and after asking blocking questions. " +
+      "The response also carries pending_acks: messages addressed to you with requires_ack that you " +
+      "have not acked, ALWAYS included regardless of the cursor (each marked pending_ack:true) until " +
+      "you bus_ack them, so a dropped ack-gated message re-surfaces instead of vanishing.",
     inputSchema: {
       type: "object",
       properties: {
@@ -123,7 +127,9 @@ const TOOLS = [
   },
   {
     name: "bus_channels",
-    description: "List channels with unread counts for the authenticated consumer.",
+    description:
+      "List channels for the authenticated consumer with unread counts and pending_ack counts " +
+      "(outstanding requires_ack messages addressed to you and not yet acked).",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -187,7 +193,7 @@ async function callTool(
           priority: args.priority ? String(args.priority) : undefined,
           body: String(args.body ?? ""),
           refs: (args.refs as Record<string, unknown> | null | undefined) ?? null,
-          requires_ack: Boolean(args.requires_ack),
+          requires_ack: args.requires_ack === undefined ? undefined : Boolean(args.requires_ack),
           ack_of: args.ack_of ? String(args.ack_of) : null,
         },
         consumerNames(env.MCP_TOKEN),

@@ -72,7 +72,8 @@ export const TOOLS: ToolDef[] = [
     description:
       "Post a structured message to a crew-bus channel. Use to: [\"*\"] to broadcast. " +
       "Recipients are validated against the registered roster (bus_consumers); a send to an " +
-      "unknown/retired name fails loudly. Set requires_ack for coordination gates. refs.issue and " +
+      "unknown/retired name fails loudly. Set requires_ack for coordination gates; type=ruling and " +
+      "type=handoff default requires_ack=true (pass false to opt out). refs.issue and " +
       "refs.pr are canonical BARE numbers (\"42\", not \"#42\"; a leading # is stripped on write).",
     inputSchema: sendSchema,
     handler: (client, a) => client.send(a),
@@ -82,7 +83,9 @@ export const TOOLS: ToolDef[] = [
     description:
       "Fetch messages since an ISO timestamp (exclusive: use prior cursor as since). " +
       "Ordered oldest-first; check the priority field for blocking messages. Own sends are not " +
-      "echoed back. Poll at turn open; use mark_seen on channel poll to clear unread.",
+      "echoed back. Poll at turn open; use mark_seen on channel poll to clear unread. The response also " +
+      "carries pending_acks: requires_ack messages addressed to you that you have not acked, ALWAYS " +
+      "included regardless of the cursor (each marked pending_ack:true) until you bus_ack them.",
     inputSchema: pollSchema,
     handler: (client, a) =>
       client.poll({
@@ -108,7 +111,9 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "bus_channels",
-    description: "List channels with unread counts.",
+    description:
+      "List channels with unread counts and pending_ack counts (outstanding requires_ack messages " +
+      "addressed to you and not yet acked).",
     inputSchema: {},
     handler: (client) => client.channels(),
   },

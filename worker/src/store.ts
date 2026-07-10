@@ -58,6 +58,13 @@ function rowToMessage(row: MessageRow): BusMessage {
   };
 }
 
+// #21: bounds the redelivery list. A dropped ack-gated message re-appears on
+// every poll (regardless of the cursor) until acked; cap it to the oldest few.
+export const PENDING_ACK_CAP = 20;
+
+/** A redelivered, still-unacked message. pending_ack distinguishes it from new traffic. */
+export type PendingAckMessage = BusMessage & { pending_ack: true };
+
 function parseTo(value: unknown): string[] {
   if (!Array.isArray(value) || value.length === 0) {
     throw new BusError("to must be a non-empty array");
@@ -159,7 +166,11 @@ export async function sendMessage(
     throw new BusError(`thread_id is capped at ${MAX_THREAD_ID_CHARS} chars`);
   }
   const created_at = nowIso();
-  const requires_ack = input.requires_ack ? 1 : 0;
+  // #21: rulings and handoffs are exactly the messages whose silent loss stalls
+  // a lane, so require an ack by default when the field is unspecified; an
+  // explicit false is still honored.
+  const requiresAckDefault = input.type === "ruling" || input.type === "handoff";
+  const requires_ack = (input.requires_ack ?? requiresAckDefault) ? 1 : 0;
 
   await db
     .prepare(
@@ -292,7 +303,7 @@ export async function pollMessages(
   db: D1Database,
   consumer: string,
   opts: { channel?: string; since?: string; limit?: number },
-): Promise<{ messages: BusMessage[]; cursor: string | null }> {
+): Promise<{ messages: BusMessage[]; cursor: string | null; pending_acks: PendingAckMessage[] }> {
   await recordPoll(db, consumer);
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
   // Exclusive since: pass the prior poll's cursor as `since` to avoid duplicates.
@@ -333,7 +344,64 @@ export async function pollMessages(
   } else if (raw.length) {
     cursor = raw[raw.length - 1]!.created_at;
   }
-  return { messages, cursor };
+  const pending_acks = await pendingAcksFor(db, consumer, opts.channel);
+  return { messages, cursor, pending_acks };
+}
+
+// #21: a consumer's outstanding ack obligations -- messages addressed to them
+// (direct or broadcast) with requires_ack=1 and no ack row yet -- ALWAYS surfaced
+// regardless of the poll cursor, so an ack-gated message dropped mid-turn
+// re-surfaces on the next auto-poll instead of vanishing behind the watermark.
+// Capped at the oldest PENDING_ACK_CAP; honors the poll's channel filter.
+async function pendingAcksFor(
+  db: D1Database,
+  consumer: string,
+  channel?: string,
+): Promise<PendingAckMessage[]> {
+  let query =
+    `SELECT * FROM messages WHERE requires_ack = 1 AND from_consumer != ? ` +
+    `AND id NOT IN (SELECT message_id FROM acks WHERE from_consumer = ?)`;
+  const binds: unknown[] = [consumer, consumer];
+  if (channel) {
+    query += ` AND channel = ?`;
+    binds.push(channel);
+  }
+  query += ` ORDER BY created_at ASC, id ASC`;
+  const { results } = await db.prepare(query).bind(...binds).all<MessageRow>();
+  return (results ?? [])
+    .map(rowToMessage)
+    .filter((m) => isVisibleTo(m.to, consumer))
+    .slice(0, PENDING_ACK_CAP)
+    .map((m) => ({ ...m, pending_ack: true as const }));
+}
+
+async function ackedMessageIds(db: D1Database, consumer: string): Promise<Set<string>> {
+  const { results } = await db
+    .prepare(`SELECT message_id FROM acks WHERE from_consumer = ?`)
+    .bind(consumer)
+    .all<{ message_id: string }>();
+  return new Set((results ?? []).map((r) => r.message_id));
+}
+
+// #21: outstanding ack obligations in one channel, for the bus_channels summary.
+async function pendingAckForChannel(
+  db: D1Database,
+  consumer: string,
+  channel: Channel,
+  acked: Set<string>,
+): Promise<number> {
+  const { results } = await db
+    .prepare(`SELECT id, from_consumer, to_json FROM messages WHERE channel = ? AND requires_ack = 1`)
+    .bind(channel)
+    .all<{ id: string; from_consumer: string; to_json: string }>();
+  let count = 0;
+  for (const row of results ?? []) {
+    if (row.from_consumer === consumer) continue; // own sends are not self-obligations
+    if (acked.has(row.id)) continue;
+    const to = JSON.parse(row.to_json) as string[];
+    if (isVisibleTo(to, consumer)) count++;
+  }
+  return count;
 }
 
 async function unreadForChannel(db: D1Database, consumer: string, channel: Channel): Promise<number> {
@@ -358,9 +426,14 @@ async function unreadForChannel(db: D1Database, consumer: string, channel: Chann
 }
 
 export async function listChannels(db: D1Database, consumer: string): Promise<ChannelSummary[]> {
+  const acked = await ackedMessageIds(db, consumer);
   const out: ChannelSummary[] = [];
   for (const channel of CHANNELS) {
-    out.push({ channel, unread: await unreadForChannel(db, consumer, channel) });
+    out.push({
+      channel,
+      unread: await unreadForChannel(db, consumer, channel),
+      pending_ack: await pendingAckForChannel(db, consumer, channel, acked),
+    });
   }
   return out;
 }

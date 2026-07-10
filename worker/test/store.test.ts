@@ -298,4 +298,69 @@ describe("store", () => {
     expect(delivery.map((d) => d.recipient).sort()).toEqual(["cursor-laptop", "strummer"]);
   });
 
+  it("re-surfaces an unacked requires_ack message on every poll until acked (#21 incident replay)", async () => {
+    const db = makeFakeD1();
+    const roster = ["mackaye", "albini"];
+
+    // The incident: a ruling sent WITHOUT requires_ack. It now defaults true for
+    // type=ruling, so the drop is recoverable.
+    const ruling = await sendMessage(
+      db,
+      "mackaye",
+      { channel: "general", to: ["albini"], type: "ruling", body: "ship it" },
+      roster,
+    );
+    expect(ruling.requires_ack).toBe(true);
+
+    const first = await pollMessages(db, "albini", { channel: "general" });
+    expect(first.messages.map((m) => m.id)).toContain(ruling.id);
+    expect(first.pending_acks.map((m) => m.id)).toEqual([ruling.id]);
+    expect(first.pending_acks[0]!.pending_ack).toBe(true);
+
+    // Poll again past the cursor WITHOUT acking (the dropped-ack case): gone from
+    // messages, but still surfaced in pending_acks. This is what a relay turn used to cost.
+    const second = await pollMessages(db, "albini", { channel: "general", since: first.cursor! });
+    expect(second.messages).toHaveLength(0);
+    expect(second.pending_acks.map((m) => m.id)).toEqual([ruling.id]);
+
+    // Acking clears it.
+    await ackMessage(db, "albini", ruling.id, "acked");
+    const third = await pollMessages(db, "albini", { channel: "general", since: first.cursor! });
+    expect(third.pending_acks).toHaveLength(0);
+  });
+
+  it("requires_ack defaults true for ruling/handoff, explicit false honored (#21)", async () => {
+    const db = makeFakeD1();
+    const ruling = await sendMessage(db, "mackaye", { channel: "general", to: ["*"], type: "ruling", body: "r" });
+    expect(ruling.requires_ack).toBe(true);
+    const handoff = await sendMessage(db, "mackaye", { channel: "general", to: ["*"], type: "handoff", body: "h" });
+    expect(handoff.requires_ack).toBe(true);
+    const status = await sendMessage(db, "mackaye", { channel: "general", to: ["*"], type: "status", body: "s" });
+    expect(status.requires_ack).toBe(false);
+    const optOut = await sendMessage(db, "mackaye", {
+      channel: "general",
+      to: ["*"],
+      type: "ruling",
+      body: "r2",
+      requires_ack: false,
+    });
+    expect(optOut.requires_ack).toBe(false);
+  });
+
+  it("bus_channels reports per-channel pending_ack counts, cleared on ack (#21)", async () => {
+    const db = makeFakeD1();
+    const handoff = await sendMessage(db, "mackaye", { channel: "fleet", to: ["albini"], type: "handoff", body: "do x" });
+
+    let channels = await listChannels(db, "albini");
+    expect(channels.find((c) => c.channel === "fleet")!.pending_ack).toBe(1);
+
+    // The sender carries no obligation on their own message.
+    const mine = await listChannels(db, "mackaye");
+    expect(mine.find((c) => c.channel === "fleet")!.pending_ack).toBe(0);
+
+    await ackMessage(db, "albini", handoff.id);
+    channels = await listChannels(db, "albini");
+    expect(channels.find((c) => c.channel === "fleet")!.pending_ack).toBe(0);
+  });
+
 });
