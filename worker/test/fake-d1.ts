@@ -136,6 +136,41 @@ export function makeFakeD1(
         return null as T | null;
       },
       async all<T>() {
+        // #21 pending_acks: requires_ack, not from self, not yet acked, optional channel.
+        if (/SELECT \* FROM messages WHERE requires_ack = 1 AND from_consumer != \?/i.test(sql)) {
+          const hasChannel = /channel = \?/i.test(sql);
+          const consumer = bound[0] as string;
+          const channel = hasChannel ? (bound[2] as string) : undefined;
+          const ackedIds = new Set(
+            state.acks.filter((a) => a.from_consumer === consumer).map((a) => a.message_id),
+          );
+          const rows = state.messages
+            .filter(
+              (m) =>
+                m.requires_ack === 1 &&
+                m.from_consumer !== consumer &&
+                !ackedIds.has(m.id) &&
+                (!channel || m.channel === channel),
+            )
+            .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+          return { results: rows as T[] };
+        }
+        // #21 acked ids for a consumer.
+        if (/SELECT message_id FROM acks WHERE from_consumer = \?/i.test(sql)) {
+          const consumer = bound[0] as string;
+          const rows = state.acks
+            .filter((a) => a.from_consumer === consumer)
+            .map((a) => ({ message_id: a.message_id }));
+          return { results: rows as T[] };
+        }
+        // #21 per-channel pending-ack candidates.
+        if (/SELECT id, from_consumer, to_json FROM messages WHERE channel = \? AND requires_ack = 1/i.test(sql)) {
+          const channel = bound[0] as string;
+          const rows = state.messages
+            .filter((m) => m.channel === channel && m.requires_ack === 1)
+            .map((m) => ({ id: m.id, from_consumer: m.from_consumer, to_json: m.to_json }));
+          return { results: rows as T[] };
+        }
         if (/SELECT name, last_poll_at FROM consumers/i.test(sql)) {
           return { results: state.consumers.map((c) => ({ ...c })) as T[] };
         }

@@ -40,7 +40,7 @@ export async function handleApi(request: Request, env: Env, pathname: string): P
           priority: body.priority ? String(body.priority) : undefined,
           body: String(body.body ?? ""),
           refs: (body.refs as Record<string, unknown> | null | undefined) ?? null,
-          requires_ack: Boolean(body.requires_ack),
+          requires_ack: body.requires_ack === undefined ? undefined : Boolean(body.requires_ack),
           ack_of: body.ack_of ? String(body.ack_of) : null,
         },
         consumerNames(env.MCP_TOKEN),

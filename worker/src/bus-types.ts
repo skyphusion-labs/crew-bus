@@ -32,6 +32,8 @@ export interface BusMessage {
 export interface ChannelSummary {
   channel: Channel;
   unread: number;
+  /** #21: outstanding requires_ack messages addressed to the consumer, not yet acked. */
+  pending_ack: number;
 }
 
 export function isChannel(value: string): value is Channel {
