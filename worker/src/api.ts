@@ -4,13 +4,17 @@ import { BusError, clientErrorMessage } from "./bus-error";
 import { CHANNELS, isChannel } from "./bus-types";
 import {
   ackMessage,
+  deleteWebhook,
+  fireWebhooks,
   getThread,
+  getWebhookView,
   listChannels,
   listConsumers,
   markChannelSeen,
   markChannelSeenLatest,
   pollMessages,
   sendMessage,
+  setWebhook,
 } from "./store";
 
 async function readJson(request: Request): Promise<Record<string, unknown>> {
@@ -21,7 +25,12 @@ async function readJson(request: Request): Promise<Record<string, unknown>> {
   }
 }
 
-export async function handleApi(request: Request, env: Env, pathname: string): Promise<Response> {
+export async function handleApi(
+  request: Request,
+  env: Env,
+  pathname: string,
+  ctx: ExecutionContext,
+): Promise<Response> {
   const consumerOrResp = requireConsumer(request, env);
   if (consumerOrResp instanceof Response) return consumerOrResp;
   const consumer = consumerOrResp;
@@ -29,6 +38,7 @@ export async function handleApi(request: Request, env: Env, pathname: string): P
   try {
     if (pathname === "/api/send" && request.method === "POST") {
       const body = await readJson(request);
+      const roster = consumerNames(env.MCP_TOKEN);
       const message = await sendMessage(
         env.DB,
         consumer,
@@ -43,8 +53,11 @@ export async function handleApi(request: Request, env: Env, pathname: string): P
           requires_ack: body.requires_ack === undefined ? undefined : Boolean(body.requires_ack),
           ack_of: body.ack_of ? String(body.ack_of) : null,
         },
-        consumerNames(env.MCP_TOKEN),
+        roster,
       );
+      // #26: ring the doorbell off the critical path. A webhook failure never
+      // fails or delays this response; it degrades to polling.
+      ctx.waitUntil(fireWebhooks(env, message, roster));
       return json({ ok: true, message });
     }
 
@@ -87,6 +100,29 @@ export async function handleApi(request: Request, env: Env, pathname: string): P
     if (pathname === "/api/consumers" && request.method === "GET") {
       const consumers = await listConsumers(env.DB, consumerNames(env.MCP_TOKEN));
       return json({ ok: true, consumers });
+    }
+
+    // #26 doorbell webhooks: a consumer manages ONLY its own row (keyed by the
+    // authenticated `consumer`). No cross-consumer read or write is possible.
+    if (pathname === "/api/webhook" && request.method === "PUT") {
+      const body = await readJson(request);
+      const webhook = await setWebhook(env.DB, consumer, {
+        url: String(body.url ?? ""),
+        secret: String(body.secret ?? ""),
+        auth_env: body.auth_env != null ? String(body.auth_env) : null,
+        enabled: body.enabled === undefined ? undefined : Boolean(body.enabled),
+      });
+      return json({ ok: true, webhook });
+    }
+
+    if (pathname === "/api/webhook" && request.method === "GET") {
+      const webhook = await getWebhookView(env.DB, consumer);
+      return json({ ok: true, webhook });
+    }
+
+    if (pathname === "/api/webhook" && request.method === "DELETE") {
+      await deleteWebhook(env.DB, consumer);
+      return json({ ok: true, deleted: true });
     }
 
     if (pathname === "/api/mark_seen" && request.method === "POST") {

@@ -41,3 +41,25 @@ CREATE TABLE IF NOT EXISTS consumers (
   name TEXT PRIMARY KEY,
   last_poll_at TEXT
 );
+
+-- Doorbell webhooks (#26, v0.4.0). ADDITIVE ONLY: new tables, no ALTER of the
+-- tables above. A registered endpoint is rung (never mailed) on a successful
+-- send so the receiver polls sooner; a lost/failed doorbell degrades to polling.
+CREATE TABLE IF NOT EXISTS webhook_endpoints (
+  consumer   TEXT PRIMARY KEY,   -- FK-by-convention to roster consumer name
+  url        TEXT NOT NULL,      -- https only, enforced at registration
+  secret     TEXT NOT NULL,      -- HMAC key for signing (protects the receiver)
+  auth_env   TEXT,               -- optional: NAME of a Worker secret sent as Authorization (D1 holds only the name)
+  enabled    INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  message_id   TEXT NOT NULL,
+  consumer     TEXT NOT NULL,
+  delivered_at TEXT,             -- null until a 2xx lands
+  attempts     INTEGER NOT NULL DEFAULT 0,
+  last_status  INTEGER,          -- last HTTP status (or 0 for network error)
+  PRIMARY KEY (message_id, consumer)
+);
