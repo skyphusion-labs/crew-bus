@@ -60,6 +60,10 @@ export const MAX_TO_ENTRIES = 16;
 export const MAX_TO_ENTRY_CHARS = 64;
 export const MAX_THREAD_ID_CHARS = 128;
 export const MAX_REF_CHARS = 512;
+// #26: caps for webhook registration input.
+export const MAX_WEBHOOK_URL_CHARS = 2048;
+export const MAX_WEBHOOK_SECRET_CHARS = 512;
+export const MAX_AUTH_ENV_CHARS = 128;
 
 export function utf8Bytes(value: string): number {
   return new TextEncoder().encode(value).length;
@@ -92,6 +96,13 @@ export interface RecipientDelivery {
   acked_at: string | null;
   /** True when the recipient ran a poll at or after this message was created. */
   polled_after: boolean;
+  // #26 doorbell webhooks: latency-optimization visibility, never a correctness
+  // signal (a null webhook_delivered_at with polled_after/acked_at set is a
+  // healthy poll-only path).
+  /** Time a webhook doorbell for this recipient landed a 2xx, or null. */
+  webhook_delivered_at: string | null;
+  /** Webhook delivery attempts made for this recipient (0 if none fired). */
+  webhook_attempts: number;
 }
 
 /** A thread message; `delivery` is present only for messages the caller sent. */
@@ -103,4 +114,38 @@ export interface ThreadMessage extends BusMessage {
 export interface ConsumerStatus {
   name: string;
   last_poll_at: string | null;
+  // #26: true when the consumer has a registered AND enabled webhook endpoint.
+  // No url/secret is ever exposed here.
+  webhook: boolean;
+}
+
+/** A registered webhook endpoint row (secret is internal; never returned raw). */
+export interface WebhookEndpoint {
+  consumer: string;
+  url: string;
+  secret: string;
+  auth_env: string | null;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Caller-safe view of a webhook endpoint: the secret value is never exposed. */
+export interface WebhookEndpointView {
+  consumer: string;
+  url: string;
+  auth_env: string | null;
+  enabled: boolean;
+  secret_set: true;
+  created_at: string;
+  updated_at: string;
+}
+
+/** True only for an https:// URL. Doorbell endpoints must be TLS. */
+export function isHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
 }

@@ -12,7 +12,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const { pathname } = url;
 
@@ -21,11 +21,11 @@ export default {
     }
 
     if (pathname === "/mcp") {
-      return handleMcp(request, env);
+      return handleMcp(request, env, ctx);
     }
 
     if (pathname.startsWith("/api/")) {
-      return handleApi(request, env, pathname);
+      return handleApi(request, env, pathname, ctx);
     }
 
     return json({ error: "not_found" }, 404);

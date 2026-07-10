@@ -21,16 +21,41 @@ export interface CursorRow {
   last_seen_at: string;
 }
 
+export interface WebhookEndpointRow {
+  consumer: string;
+  url: string;
+  secret: string;
+  auth_env: string | null;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WebhookDeliveryRow {
+  message_id: string;
+  consumer: string;
+  delivered_at: string | null;
+  attempts: number;
+  last_status: number | null;
+}
+
 export interface FakeD1State {
   messages: MessageRow[];
   cursors: CursorRow[];
   acks: { message_id: string; from_consumer: string; body: string | null; created_at: string }[];
   consumers: { name: string; last_poll_at: string }[];
+  webhook_endpoints?: WebhookEndpointRow[];
+  webhook_deliveries?: WebhookDeliveryRow[];
 }
 
 export function makeFakeD1(
   state: FakeD1State = { messages: [], cursors: [], acks: [], consumers: [] },
 ): D1Database {
+  // #26: normalize the new tables so callers passing a partial state literal
+  // (every pre-#26 test) still work.
+  const endpoints: WebhookEndpointRow[] = (state.webhook_endpoints ??= []);
+  const deliveries: WebhookDeliveryRow[] = (state.webhook_deliveries ??= []);
+
   function makeStmt(sql: string) {
     let bound: unknown[] = [];
     return {
@@ -117,6 +142,57 @@ export function makeFakeD1(
           else state.cursors[idx] = row;
           return { meta: { changes: 1 } };
         }
+        // #26: webhook_endpoints upsert (created_at preserved on conflict).
+        if (/INSERT INTO webhook_endpoints/i.test(sql)) {
+          const [consumer, url, secret, auth_env, enabled, created_at, updated_at] = bound as [
+            string,
+            string,
+            string,
+            string | null,
+            number,
+            string,
+            string,
+          ];
+          const idx = endpoints.findIndex((e) => e.consumer === consumer);
+          if (idx === -1) {
+            endpoints.push({ consumer, url, secret, auth_env, enabled, created_at, updated_at });
+          } else {
+            endpoints[idx] = {
+              ...endpoints[idx]!,
+              url,
+              secret,
+              auth_env,
+              enabled,
+              updated_at,
+            };
+          }
+          return { meta: { changes: 1 } };
+        }
+        // #26: webhook_deliveries upsert keyed by (message_id, consumer).
+        if (/INSERT INTO webhook_deliveries/i.test(sql)) {
+          const [message_id, consumer, delivered_at, attempts, last_status] = bound as [
+            string,
+            string,
+            string | null,
+            number,
+            number | null,
+          ];
+          const idx = deliveries.findIndex(
+            (d) => d.message_id === message_id && d.consumer === consumer,
+          );
+          const row = { message_id, consumer, delivered_at, attempts, last_status };
+          if (idx === -1) deliveries.push(row);
+          else deliveries[idx] = row;
+          return { meta: { changes: 1 } };
+        }
+        if (/DELETE FROM webhook_endpoints/i.test(sql)) {
+          const [consumer] = bound as [string];
+          const before = endpoints.length;
+          const kept = endpoints.filter((e) => e.consumer !== consumer);
+          endpoints.length = 0;
+          endpoints.push(...kept);
+          return { meta: { changes: before - endpoints.length } };
+        }
         if (/DELETE FROM acks/i.test(sql)) return { meta: { changes: 0 } };
         if (/DELETE FROM messages/i.test(sql)) {
           const [cutoff] = bound as [string];
@@ -143,6 +219,12 @@ export function makeFakeD1(
           const [consumer, channel] = bound as [string, string];
           const row = state.cursors.find((c) => c.consumer === consumer && c.channel === channel);
           return (row ? { last_seen_at: row.last_seen_at } : null) as T | null;
+        }
+        // #26: fetch one webhook endpoint row by consumer.
+        if (/SELECT consumer, url, secret, auth_env, enabled, created_at, updated_at FROM webhook_endpoints WHERE consumer = \?/i.test(sql)) {
+          const consumer = bound[0] as string;
+          const row = endpoints.find((e) => e.consumer === consumer);
+          return (row ? { ...row } : null) as T | null;
         }
         return null as T | null;
       },
@@ -190,6 +272,19 @@ export function makeFakeD1(
           const rows = state.acks
             .filter((a) => a.message_id === messageId)
             .map((a) => ({ from_consumer: a.from_consumer, created_at: a.created_at }));
+          return { results: rows as T[] };
+        }
+        // #26: webhook delivery accounting for a message, keyed by recipient.
+        if (/SELECT consumer, delivered_at, attempts FROM webhook_deliveries WHERE message_id = \?/i.test(sql)) {
+          const messageId = bound[0] as string;
+          const rows = deliveries
+            .filter((d) => d.message_id === messageId)
+            .map((d) => ({ consumer: d.consumer, delivered_at: d.delivered_at, attempts: d.attempts }));
+          return { results: rows as T[] };
+        }
+        // #26: consumers with an enabled endpoint (bus_consumers webhook flag).
+        if (/SELECT consumer FROM webhook_endpoints WHERE enabled = 1/i.test(sql)) {
+          const rows = endpoints.filter((e) => e.enabled === 1).map((e) => ({ consumer: e.consumer }));
           return { results: rows as T[] };
         }
         if (/SELECT \* FROM messages WHERE thread_id = \?/i.test(sql)) {

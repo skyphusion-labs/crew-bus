@@ -10,13 +10,19 @@ import {
   type Priority,
   type RecipientDelivery,
   type ThreadMessage,
+  type WebhookEndpoint,
+  type WebhookEndpointView,
   CHANNELS,
+  MAX_AUTH_ENV_CHARS,
   MAX_BODY_BYTES,
   MAX_REF_CHARS,
   MAX_THREAD_ID_CHARS,
   MAX_TO_ENTRIES,
   MAX_TO_ENTRY_CHARS,
+  MAX_WEBHOOK_SECRET_CHARS,
+  MAX_WEBHOOK_URL_CHARS,
   isChannel,
+  isHttpsUrl,
   isMessageType,
   isPriority,
   isVisibleTo,
@@ -224,6 +230,7 @@ export async function sendMessage(
 // Sender-side delivery visibility (#17.3): for messages the CALLER sent, attach
 // a per-recipient delivery report so a parked handoff is self-diagnosable in one
 // call, with no human in the loop. Broadcasts report against the full roster.
+// #26: each report also carries webhook_delivered_at / webhook_attempts.
 export async function getThread(
   db: D1Database,
   threadId: string,
@@ -263,12 +270,22 @@ export async function getThread(
       .all<{ from_consumer: string; created_at: string }>();
     const ackMap = new Map((ackRows ?? []).map((r) => [r.from_consumer, r.created_at] as const));
 
+    // #26: webhook delivery accounting for this message, keyed by recipient.
+    const { results: whRows } = await db
+      .prepare(`SELECT consumer, delivered_at, attempts FROM webhook_deliveries WHERE message_id = ?`)
+      .bind(m.id)
+      .all<{ consumer: string; delivered_at: string | null; attempts: number }>();
+    const whMap = new Map((whRows ?? []).map((r) => [r.consumer, r] as const));
+
     const delivery: RecipientDelivery[] = recipients.map((r) => {
       const lastPoll = pollMap.get(r) ?? null;
+      const wh = whMap.get(r);
       return {
         recipient: r,
         acked_at: ackMap.get(r) ?? null,
         polled_after: lastPoll !== null && lastPoll >= m.created_at,
+        webhook_delivered_at: wh?.delivered_at ?? null,
+        webhook_attempts: wh?.attempts ?? 0,
       };
     });
     out.push({ ...m, delivery });
@@ -291,12 +308,18 @@ export async function recordPoll(db: D1Database, consumer: string): Promise<void
 
 // Consumer discovery (#17.2): the registered roster (from the token map) joined
 // with each consumer's last_poll_at. Names with no poll row yet return null.
+// #26: also reports a webhook flag (registered AND enabled), no url/secret.
 export async function listConsumers(db: D1Database, names: string[]): Promise<ConsumerStatus[]> {
   const { results } = await db
     .prepare(`SELECT name, last_poll_at FROM consumers`)
     .all<{ name: string; last_poll_at: string | null }>();
   const pollMap = new Map((results ?? []).map((r) => [r.name, r.last_poll_at] as const));
-  return names.map((name) => ({ name, last_poll_at: pollMap.get(name) ?? null }));
+  const webhookNames = await enabledWebhookConsumers(db);
+  return names.map((name) => ({
+    name,
+    last_poll_at: pollMap.get(name) ?? null,
+    webhook: webhookNames.has(name),
+  }));
 }
 
 export async function pollMessages(
@@ -537,4 +560,270 @@ export async function purgeExpired(db: D1Database, env: Env): Promise<number> {
 export async function getMessage(db: D1Database, id: string): Promise<BusMessage | null> {
   const row = await db.prepare(`SELECT * FROM messages WHERE id = ?`).bind(id).first<MessageRow>();
   return row ? rowToMessage(row) : null;
+}
+
+// ---------------------------------------------------------------------------
+// #26 doorbell webhooks
+// ---------------------------------------------------------------------------
+
+interface WebhookEndpointRow {
+  consumer: string;
+  url: string;
+  secret: string;
+  auth_env: string | null;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+function rowToEndpoint(row: WebhookEndpointRow): WebhookEndpoint {
+  return {
+    consumer: row.consumer,
+    url: row.url,
+    secret: row.secret,
+    auth_env: row.auth_env,
+    enabled: row.enabled === 1,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+/** Caller-safe view: the secret VALUE is never surfaced, only secret_set: true. */
+function toView(ep: WebhookEndpoint): WebhookEndpointView {
+  return {
+    consumer: ep.consumer,
+    url: ep.url,
+    auth_env: ep.auth_env,
+    enabled: ep.enabled,
+    secret_set: true,
+    created_at: ep.created_at,
+    updated_at: ep.updated_at,
+  };
+}
+
+/** The registered endpoint for a consumer, or null. Internal (carries secret). */
+export async function getWebhook(db: D1Database, consumer: string): Promise<WebhookEndpoint | null> {
+  const row = await db
+    .prepare(
+      `SELECT consumer, url, secret, auth_env, enabled, created_at, updated_at FROM webhook_endpoints WHERE consumer = ?`,
+    )
+    .bind(consumer)
+    .first<WebhookEndpointRow>();
+  return row ? rowToEndpoint(row) : null;
+}
+
+/** Caller-safe endpoint view for a consumer, or null when unregistered. */
+export async function getWebhookView(
+  db: D1Database,
+  consumer: string,
+): Promise<WebhookEndpointView | null> {
+  const ep = await getWebhook(db, consumer);
+  return ep ? toView(ep) : null;
+}
+
+export interface WebhookInput {
+  url: string;
+  secret: string;
+  auth_env?: string | null;
+  enabled?: boolean;
+}
+
+/** Register or replace a consumer's own endpoint. Rejects non-https. Returns the masked view. */
+export async function setWebhook(
+  db: D1Database,
+  consumer: string,
+  input: WebhookInput,
+): Promise<WebhookEndpointView> {
+  const url = String(input.url ?? "").trim();
+  if (!url) throw new BusError("url is required");
+  if (url.length > MAX_WEBHOOK_URL_CHARS) {
+    throw new BusError(`url is capped at ${MAX_WEBHOOK_URL_CHARS} chars`);
+  }
+  if (!isHttpsUrl(url)) throw new BusError("url must be https");
+  const secret = String(input.secret ?? "");
+  if (!secret) throw new BusError("secret is required");
+  if (secret.length > MAX_WEBHOOK_SECRET_CHARS) {
+    throw new BusError(`secret is capped at ${MAX_WEBHOOK_SECRET_CHARS} chars`);
+  }
+  const authEnv = input.auth_env != null ? String(input.auth_env).trim() : null;
+  if (authEnv && authEnv.length > MAX_AUTH_ENV_CHARS) {
+    throw new BusError(`auth_env is capped at ${MAX_AUTH_ENV_CHARS} chars`);
+  }
+  const enabled = input.enabled === undefined ? 1 : input.enabled ? 1 : 0;
+  const now = nowIso();
+
+  await db
+    .prepare(
+      `INSERT INTO webhook_endpoints (consumer, url, secret, auth_env, enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(consumer) DO UPDATE SET
+         url = excluded.url,
+         secret = excluded.secret,
+         auth_env = excluded.auth_env,
+         enabled = excluded.enabled,
+         updated_at = excluded.updated_at`,
+    )
+    .bind(consumer, url, secret, authEnv || null, enabled, now, now)
+    .run();
+
+  const ep = await getWebhook(db, consumer);
+  if (!ep) throw new BusError("failed to persist webhook endpoint");
+  return toView(ep);
+}
+
+export async function deleteWebhook(db: D1Database, consumer: string): Promise<void> {
+  await db.prepare(`DELETE FROM webhook_endpoints WHERE consumer = ?`).bind(consumer).run();
+}
+
+/** Consumers with a registered AND enabled endpoint (bus_consumers webhook flag). */
+async function enabledWebhookConsumers(db: D1Database): Promise<Set<string>> {
+  const { results } = await db
+    .prepare(`SELECT consumer FROM webhook_endpoints WHERE enabled = 1`)
+    .all<{ consumer: string }>();
+  return new Set((results ?? []).map((r) => r.consumer));
+}
+
+/** Upsert the delivery accounting row for one (message, recipient) pair. */
+async function recordDelivery(
+  db: D1Database,
+  messageId: string,
+  consumer: string,
+  deliveredAt: string | null,
+  attempts: number,
+  lastStatus: number,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO webhook_deliveries (message_id, consumer, delivered_at, attempts, last_status)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(message_id, consumer) DO UPDATE SET
+         delivered_at = excluded.delivered_at,
+         attempts = excluded.attempts,
+         last_status = excluded.last_status`,
+    )
+    .bind(messageId, consumer, deliveredAt, attempts, lastStatus)
+    .run();
+}
+
+async function hmacSha256Hex(secret: string, data: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data));
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Backoff before retry attempts 2 and 3 (~1s then ~5s). Injectable in tests.
+const WEBHOOK_BACKOFF_MS = [1000, 5000] as const;
+const WEBHOOK_MAX_ATTEMPTS = 3;
+
+export interface FireOptions {
+  fetchImpl?: typeof fetch;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+async function deliverOne(
+  db: D1Database,
+  env: Env,
+  message: BusMessage,
+  ep: WebhookEndpoint,
+  fetchImpl: typeof fetch,
+  sleep: (ms: number) => Promise<void>,
+): Promise<void> {
+  const consumer = ep.consumer;
+  // Doorbell payload: NO message body, ever. The receiver's only correct
+  // reaction is to poll the bus.
+  const rawBody = JSON.stringify({
+    message_id: message.id,
+    channel: message.channel,
+    thread_id: message.thread_id,
+    sent_at: message.created_at,
+  });
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const signature = `sha256=${await hmacSha256Hex(ep.secret, `${timestamp}.${rawBody}`)}`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-Bus-Timestamp": timestamp,
+    "X-Bus-Consumer": consumer,
+    "X-Bus-Signature": signature,
+  };
+  if (ep.auth_env) {
+    const authVal = env[ep.auth_env];
+    if (typeof authVal === "string" && authVal) {
+      headers["Authorization"] = authVal;
+    } else {
+      // Missing binding: log and skip the auth header, still fire the doorbell.
+      console.log(
+        JSON.stringify({ event: "webhook_auth_env_missing", consumer, auth_env: ep.auth_env }),
+      );
+    }
+  }
+
+  let attempts = 0;
+  let lastStatus = 0;
+  let deliveredAt: string | null = null;
+  for (let i = 0; i < WEBHOOK_MAX_ATTEMPTS; i++) {
+    if (i > 0) await sleep(WEBHOOK_BACKOFF_MS[i - 1] ?? 5000);
+    attempts = i + 1;
+    try {
+      const res = await fetchImpl(ep.url, { method: "POST", headers, body: rawBody });
+      lastStatus = res.status;
+      if (res.status >= 200 && res.status < 300) {
+        deliveredAt = nowIso();
+        break;
+      }
+    } catch {
+      // Network error: status 0, keep retrying within the attempt budget.
+      lastStatus = 0;
+    }
+  }
+  await recordDelivery(db, message.id, consumer, deliveredAt, attempts, lastStatus);
+}
+
+// Fire doorbell webhooks for a successful send. MUST NOT throw: it runs inside
+// ctx.waitUntil, off the send's critical path, and a webhook failure degrades to
+// exactly the poll-only behavior. Resolves the recipient set (roster-expanded
+// "*", minus the sender), fires only enabled endpoints, and records every path.
+export async function fireWebhooks(
+  env: Env,
+  message: BusMessage,
+  knownConsumers: string[],
+  opts: FireOptions = {},
+): Promise<void> {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  try {
+    const recipients = (message.to.includes("*") ? knownConsumers : message.to).filter(
+      (r) => r !== message.from,
+    );
+    for (const consumer of recipients) {
+      try {
+        const ep = await getWebhook(env.DB, consumer);
+        if (!ep || !ep.enabled) continue;
+        await deliverOne(env.DB, env, message, ep, fetchImpl, sleep);
+      } catch (err) {
+        // One bad recipient must not stop the others or fail the send path.
+        console.error(
+          JSON.stringify({
+            event: "webhook_deliver_error",
+            consumer,
+            message_id: message.id,
+            detail: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      }
+    }
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        event: "webhook_fire_error",
+        message_id: message.id,
+        detail: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
 }

@@ -244,8 +244,8 @@ describe("store", () => {
 
     let consumers = await listConsumers(db, roster);
     expect(consumers).toEqual([
-      { name: "mackaye", last_poll_at: null },
-      { name: "cursor-laptop", last_poll_at: null },
+      { name: "mackaye", last_poll_at: null, webhook: false },
+      { name: "cursor-laptop", last_poll_at: null, webhook: false },
     ]);
 
     await pollMessages(db, "cursor-laptop", { channel: "general" });
@@ -268,7 +268,7 @@ describe("store", () => {
     // Before the recipient polls: addressed but not yet seen or acked.
     let thread = await getThread(db, sent.thread_id, "mackaye", roster);
     let delivery = thread.find((m) => m.id === sent.id)!.delivery!;
-    expect(delivery).toEqual([{ recipient: "cursor-laptop", acked_at: null, polled_after: false }]);
+    expect(delivery).toEqual([{ recipient: "cursor-laptop", acked_at: null, polled_after: false, webhook_delivered_at: null, webhook_attempts: 0 }]);
 
     // Recipient polls (records last_poll_at), then acks.
     await new Promise((r) => setTimeout(r, 2));
@@ -388,7 +388,7 @@ describe("store", () => {
     const handoff = thread.find((m) => m.id === sent.id)!;
     // Delivery report: a single ack, acked_at is the FIRST ack time.
     expect(handoff.delivery).toEqual([
-      { recipient: "cursor-laptop", acked_at: first.created_at, polled_after: true },
+      { recipient: "cursor-laptop", acked_at: first.created_at, polled_after: true, webhook_delivered_at: null, webhook_attempts: 0 },
     ]);
     // Exactly one ack-type message landed in the thread.
     expect(thread.filter((m) => m.type === "ack")).toHaveLength(1);

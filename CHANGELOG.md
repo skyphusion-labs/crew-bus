@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.4.0
+
+### #26 -- doorbell webhooks
+
+- Optional per-consumer webhook endpoints: on every successful send, each resolved recipient (roster-expanded `*`, minus the sender) with an enabled registered endpoint is rung with a body-less doorbell (`{message_id, channel, thread_id, sent_at}`). The receiver's only correct reaction is to poll the bus; the bus stays the single source of truth.
+- Signed + attributed: headers `X-Bus-Timestamp` (unix seconds), `X-Bus-Consumer`, and `X-Bus-Signature: sha256=<hmac_sha256(secret, timestamp + "." + rawBody)>`. An optional `Authorization` header is sent from the wrangler secret NAMED in the row's `auth_env` (D1 stores only the name; a missing binding logs and skips the header but still fires).
+- DEGRADATION GUARANTEE: firing happens in `ctx.waitUntil`, off the send's critical path. A lost, failing, or throwing webhook NEVER fails or delays the send response; it degrades to exactly the v0.3.0 polling + `pending_acks` behavior. Retry is 3 attempts total (~1s/5s backoff), all inside the one `waitUntil`.
+- NO message body ever leaves the bus via webhook, which is what keeps receiver endpoints low-trust: a leaked webhook secret only lets an attacker ring a doorbell (cause a poll), never read message content.
+- API (bearer-authed, a consumer manages ONLY its own row): `PUT /api/webhook` (register/replace, https-only, returns the row with the secret masked), `GET /api/webhook` (`secret_set: true`, never the value), `DELETE /api/webhook`. MCP tools `bus_webhook_set` / `bus_webhook_get` / `bus_webhook_clear` map 1:1 (both the stdio `@skyphusion/crew-bus` client and the Worker's remote `/mcp` surface).
+- Delivery visibility: `bus_thread` per-recipient delivery reports gain `webhook_delivered_at` (nullable) and `webhook_attempts` alongside `acked_at` / `polled_after`; `bus_consumers` gains a `webhook: true|false` flag per consumer (registered AND enabled; no url/secret exposed).
+- Schema is ADDITIVE ONLY: new `webhook_endpoints` and `webhook_deliveries` tables, no ALTER of existing tables.
+
 ## 0.3.0
 
 ### #21 -- pending_acks redelivery

@@ -7,6 +7,8 @@
 # Secrets (wrangler secret put):
 #   MCP_TOKEN — comma-separated per-consumer tokens, e.g.:
 #     alice=...,bob=...
+#   <AUTH_ENV_NAME> -- optional per-webhook Authorization value; a webhook row's
+#     auth_env NAMES this binding (real credential stays in wrangler secrets).
 
 name = "crew-bus"
 main = "src/index.ts"
