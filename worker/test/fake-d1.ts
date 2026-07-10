@@ -93,10 +93,13 @@ export function makeFakeD1(
           const idx = state.acks.findIndex(
             (a) => a.message_id === message_id && a.from_consumer === from_consumer,
           );
+          // #22: ON CONFLICT DO NOTHING -- a duplicate ack keeps the first row.
           const row = { message_id, from_consumer, body, created_at };
-          if (idx === -1) state.acks.push(row);
-          else state.acks[idx] = row;
-          return { meta: { changes: 1 } };
+          if (idx === -1) {
+            state.acks.push(row);
+            return { meta: { changes: 1 } };
+          }
+          return { meta: { changes: 0 } };
         }
         if (/INSERT INTO consumers/i.test(sql)) {
           const [name, last_poll_at] = bound as [string, string];
@@ -124,6 +127,14 @@ export function makeFakeD1(
         return { meta: { changes: 0 } };
       },
       async first<T>() {
+        // #22 idempotent-ack lookup: the first ack this consumer made on a message.
+        if (/SELECT \* FROM messages WHERE ack_of = \? AND from_consumer = \?/i.test(sql)) {
+          const [ackOf, fromConsumer] = bound as [string, string];
+          const rows = state.messages
+            .filter((m) => m.ack_of === ackOf && m.from_consumer === fromConsumer && m.type === "ack")
+            .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+          return (rows[0] ?? null) as T | null;
+        }
         if (/SELECT \* FROM messages WHERE id = \?/i.test(sql)) {
           const id = bound[0] as string;
           return (state.messages.find((m) => m.id === id) ?? null) as T | null;

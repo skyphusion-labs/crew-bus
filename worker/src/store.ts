@@ -199,7 +199,7 @@ export async function sendMessage(
       .prepare(
         `INSERT INTO acks (message_id, from_consumer, body, created_at)
          VALUES (?, ?, ?, ?)
-         ON CONFLICT(message_id, from_consumer) DO UPDATE SET body = excluded.body, created_at = excluded.created_at`,
+         ON CONFLICT(message_id, from_consumer) DO NOTHING`,
       )
       .bind(input.ack_of, from, body, created_at)
       .run();
@@ -454,6 +454,19 @@ export async function ackMessage(
   if (!isVisibleTo(original.to, from) && original.from !== from) {
     throw new BusError("not authorized to ack this message");
   }
+
+  // #22: idempotent. A retried/duplicated ack must not create a second ack row
+  // or a second ack-type message; return the FIRST ack unchanged. The acks PK
+  // (message_id, from_consumer) is the durable guard (DO NOTHING above); this
+  // makes the whole operation a no-op on repeat so thread history and delivery
+  // reports stay clean.
+  const existing = await db
+    .prepare(
+      `SELECT * FROM messages WHERE ack_of = ? AND from_consumer = ? AND type = 'ack' ORDER BY created_at ASC, id ASC LIMIT 1`,
+    )
+    .bind(messageId, from)
+    .first<MessageRow>();
+  if (existing) return rowToMessage(existing);
 
   // Ack replies address the original sender (a prior participant by definition),
   // so recipient validation is intentionally skipped here.
