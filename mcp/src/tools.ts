@@ -71,7 +71,9 @@ export const TOOLS: ToolDef[] = [
     name: "bus_send",
     description:
       "Post a structured message to a crew-bus channel. Use to: [\"*\"] to broadcast. " +
-      "Set requires_ack for coordination gates.",
+      "Recipients are validated against the registered roster (bus_consumers); a send to an " +
+      "unknown/retired name fails loudly. Set requires_ack for coordination gates. refs.issue and " +
+      "refs.pr are canonical BARE numbers (\"42\", not \"#42\"; a leading # is stripped on write).",
     inputSchema: sendSchema,
     handler: (client, a) => client.send(a),
   },
@@ -92,7 +94,9 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "bus_thread",
-    description: "Fetch every message in a thread, ordered oldest-first.",
+    description:
+      "Fetch every message in a thread, ordered oldest-first. Messages YOU sent carry a per-recipient " +
+      "delivery report (acked_at + polled_after) so you can confirm a handoff landed without a human relay.",
     inputSchema: threadSchema,
     handler: (client, a) => client.thread(String(a.thread_id)),
   },
@@ -107,6 +111,14 @@ export const TOOLS: ToolDef[] = [
     description: "List channels with unread counts.",
     inputSchema: {},
     handler: (client) => client.channels(),
+  },
+  {
+    name: "bus_consumers",
+    description:
+      "List the registered consumer roster (valid recipients) with each consumer's last_poll_at " +
+      "(null if never polled). Use to discover who is addressable.",
+    inputSchema: {},
+    handler: (client) => client.consumers(),
   },
   {
     name: "bus_mark_seen",

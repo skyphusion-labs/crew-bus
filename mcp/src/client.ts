@@ -159,6 +159,10 @@ export class CrewBusClient {
     return this.request("GET", "/api/channels");
   }
 
+  consumers() {
+    return this.request("GET", "/api/consumers");
+  }
+
   markSeen(channel: string, lastSeenAt?: string) {
     return this.request("POST", "/api/mark_seen", {
       channel,

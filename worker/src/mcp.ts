@@ -1,12 +1,13 @@
 import type { Env } from "./env";
 import { BusError, clientErrorMessage } from "./bus-error";
-import { json, matchConsumer, bearerToken } from "./auth";
+import { json, matchConsumer, bearerToken, consumerNames } from "./auth";
 import { CHANNELS, MESSAGE_TYPES, PRIORITIES, isChannel } from "./bus-types";
 import { VERSION } from "./version";
 import {
   ackMessage,
   getThread,
   listChannels,
+  listConsumers,
   markChannelSeen,
   markChannelSeenLatest,
   pollMessages,
@@ -21,7 +22,10 @@ const TOOLS = [
     name: "bus_send",
     description:
       "Post a structured message to a crew-bus channel. Use to: [\"*\"] to broadcast. " +
-      "Set requires_ack for coordination gates. Include refs (repo, issue, branch, pr) when relevant.",
+      "Recipients are validated against the registered roster (bus_consumers): a send to an " +
+      "unknown/retired name fails loudly rather than vanishing. Set requires_ack for coordination " +
+      "gates. Include refs (repo, issue, branch, pr) when relevant; refs.issue and refs.pr are " +
+      "canonical BARE numbers (\"42\", not \"#42\"; a leading # is stripped on write).",
     inputSchema: {
       type: "object",
       properties: {
@@ -30,7 +34,7 @@ const TOOLS = [
         to: {
           type: "array",
           items: { type: "string" },
-          description: 'Recipients (consumer names) or ["*"] for broadcast',
+          description: 'Recipients (registered consumer names) or ["*"] for broadcast',
         },
         type: { type: "string", enum: [...MESSAGE_TYPES] },
         priority: { type: "string", enum: [...PRIORITIES] },
@@ -39,9 +43,9 @@ const TOOLS = [
           type: "object",
           properties: {
             repo: { type: "string" },
-            issue: { type: "string" },
+            issue: { type: "string", description: "Bare issue number, e.g. \"42\" (a leading # is stripped)" },
             branch: { type: "string" },
-            pr: { type: "string", nullable: true },
+            pr: { type: "string", nullable: true, description: "Bare PR number, e.g. \"17\" (a leading # is stripped)" },
           },
         },
         requires_ack: { type: "boolean" },
@@ -92,7 +96,11 @@ const TOOLS = [
   },
   {
     name: "bus_thread",
-    description: "Fetch every message in a thread, ordered oldest-first.",
+    description:
+      "Fetch every message in a thread, ordered oldest-first. For messages YOU sent, each carries a " +
+      "per-recipient delivery report: acked_at (exact ack time or null) and polled_after (true if the " +
+      "recipient polled at/after the message was sent). Broadcasts report against the full roster. Use " +
+      "this to confirm a handoff landed without asking a human.",
     inputSchema: {
       type: "object",
       properties: {
@@ -116,6 +124,14 @@ const TOOLS = [
   {
     name: "bus_channels",
     description: "List channels with unread counts for the authenticated consumer.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "bus_consumers",
+    description:
+      "List the registered consumer roster (valid bus_send recipients) with each consumer's " +
+      "last_poll_at (null if never polled). Use to discover who is addressable and roughly when " +
+      "they last checked the bus.",
     inputSchema: { type: "object", properties: {} },
   },
 ] as const;
@@ -160,17 +176,22 @@ async function callTool(
 ): Promise<{ content: { type: "text"; text: string }[]; isError?: boolean }> {
   switch (name) {
     case "bus_send": {
-      const message = await sendMessage(env.DB, consumer, {
-        channel: String(args.channel ?? ""),
-        thread_id: args.thread_id ? String(args.thread_id) : undefined,
-        to: args.to as string[],
-        type: String(args.type ?? ""),
-        priority: args.priority ? String(args.priority) : undefined,
-        body: String(args.body ?? ""),
-        refs: (args.refs as Record<string, unknown> | null | undefined) ?? null,
-        requires_ack: Boolean(args.requires_ack),
-        ack_of: args.ack_of ? String(args.ack_of) : null,
-      });
+      const message = await sendMessage(
+        env.DB,
+        consumer,
+        {
+          channel: String(args.channel ?? ""),
+          thread_id: args.thread_id ? String(args.thread_id) : undefined,
+          to: args.to as string[],
+          type: String(args.type ?? ""),
+          priority: args.priority ? String(args.priority) : undefined,
+          body: String(args.body ?? ""),
+          refs: (args.refs as Record<string, unknown> | null | undefined) ?? null,
+          requires_ack: Boolean(args.requires_ack),
+          ack_of: args.ack_of ? String(args.ack_of) : null,
+        },
+        consumerNames(env.MCP_TOKEN),
+      );
       return toolText({ ok: true, message });
     }
     case "bus_poll": {
@@ -188,7 +209,7 @@ async function callTool(
     case "bus_thread": {
       const threadId = String(args.thread_id ?? "").trim();
       if (!threadId) throw new BusError("thread_id is required");
-      const messages = await getThread(env.DB, threadId, consumer);
+      const messages = await getThread(env.DB, threadId, consumer, consumerNames(env.MCP_TOKEN));
       return toolText({ ok: true, thread_id: threadId, count: messages.length, messages });
     }
     case "bus_ack": {
@@ -205,6 +226,10 @@ async function callTool(
     case "bus_channels": {
       const channels = await listChannels(env.DB, consumer);
       return toolText({ ok: true, consumer, channels });
+    }
+    case "bus_consumers": {
+      const consumers = await listConsumers(env.DB, consumerNames(env.MCP_TOKEN));
+      return toolText({ ok: true, consumers });
     }
     case "bus_mark_seen": {
       const channel = String(args.channel ?? "").trim();
