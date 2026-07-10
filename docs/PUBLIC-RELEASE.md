@@ -25,7 +25,7 @@ rg -i \
 
 # Expect: no matches
 # - wrangler.toml is gitignored; example uses REPLACE_WITH_D1_ID + placeholder route
-# - ci.yml / deploy.yml use ubuntu-latest (not [self-hosted, fleet])
+# - ci.yml / deploy.yml use ubuntu-latest (estate public-repo runner rule)
 # - deploy health URL comes from CREW_BUS_HEALTH_URL secret
 ```
 
