@@ -11,6 +11,9 @@ describe("TOOLS", () => {
       "bus_poll",
       "bus_send",
       "bus_thread",
+      "bus_webhook_clear",
+      "bus_webhook_get",
+      "bus_webhook_set",
     ]);
   });
 });

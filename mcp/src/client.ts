@@ -174,6 +174,20 @@ export class CrewBusClient {
     return this.request("GET", "/api/consumers");
   }
 
+  // #26 doorbell webhooks: a consumer manages ONLY its own row (server keys on
+  // the authenticated bearer, so no consumer field is sent).
+  webhookSet(args: Record<string, unknown>) {
+    return this.request("PUT", "/api/webhook", args);
+  }
+
+  webhookGet() {
+    return this.request("GET", "/api/webhook");
+  }
+
+  webhookClear() {
+    return this.request("DELETE", "/api/webhook");
+  }
+
   markSeen(channel: string, lastSeenAt?: string) {
     return this.request("POST", "/api/mark_seen", {
       channel,

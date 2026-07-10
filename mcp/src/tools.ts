@@ -59,6 +59,13 @@ const markSeenSchema = {
   last_seen_at: z.string().optional(),
 };
 
+const webhookSetSchema = {
+  url: z.string().min(1),
+  secret: z.string().min(1),
+  auth_env: z.string().optional(),
+  enabled: z.boolean().optional(),
+};
+
 interface ToolDef {
   name: string;
   description: string;
@@ -99,7 +106,8 @@ export const TOOLS: ToolDef[] = [
     name: "bus_thread",
     description:
       "Fetch every message in a thread, ordered oldest-first. Messages YOU sent carry a per-recipient " +
-      "delivery report (acked_at + polled_after) so you can confirm a handoff landed without a human relay.",
+      "delivery report (acked_at, polled_after, plus webhook_delivered_at + webhook_attempts) so you can " +
+      "confirm a handoff landed without a human relay.",
     inputSchema: threadSchema,
     handler: (client, a) => client.thread(String(a.thread_id)),
   },
@@ -121,9 +129,35 @@ export const TOOLS: ToolDef[] = [
     name: "bus_consumers",
     description:
       "List the registered consumer roster (valid recipients) with each consumer's last_poll_at " +
-      "(null if never polled). Use to discover who is addressable.",
+      "(null if never polled) and webhook (true when a doorbell endpoint is registered and enabled). " +
+      "Use to discover who is addressable.",
     inputSchema: {},
     handler: (client) => client.consumers(),
+  },
+  {
+    name: "bus_webhook_set",
+    description:
+      "Register or replace YOUR OWN doorbell webhook. On a successful send addressed to you, the bus " +
+      "POSTs a body-less doorbell ({message_id, channel, thread_id, sent_at}) signed with your secret " +
+      "(X-Bus-Signature: sha256=hmac); react by polling. url must be https. secret is the HMAC key. " +
+      "auth_env optionally names a Worker secret sent as the Authorization header (name only is stored). " +
+      "A lost doorbell degrades to polling; never a correctness dependency.",
+    inputSchema: webhookSetSchema,
+    handler: (client, a) => client.webhookSet(a),
+  },
+  {
+    name: "bus_webhook_get",
+    description:
+      "Fetch YOUR OWN doorbell webhook config. The secret VALUE is never returned (secret_set: true " +
+      "indicates one is set). Returns null when no endpoint is registered.",
+    inputSchema: {},
+    handler: (client) => client.webhookGet(),
+  },
+  {
+    name: "bus_webhook_clear",
+    description: "Unregister YOUR OWN doorbell webhook endpoint (deletes the row).",
+    inputSchema: {},
+    handler: (client) => client.webhookClear(),
   },
   {
     name: "bus_mark_seen",

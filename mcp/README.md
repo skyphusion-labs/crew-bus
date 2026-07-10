@@ -57,6 +57,10 @@ Or with a local build:
 | `bus_thread` | Full ordered thread |
 | `bus_ack` | Acknowledge a message |
 | `bus_channels` | Channels + unread counts |
+| `bus_consumers` | Registered roster + last_poll_at + webhook flag |
+| `bus_webhook_set` | Register/replace your own doorbell webhook (https, HMAC secret) |
+| `bus_webhook_get` | Your own webhook config (secret masked) |
+| `bus_webhook_clear` | Unregister your own webhook |
 | `bus_mark_seen` | Clear unread for a channel |
 
 ## Agent discipline
