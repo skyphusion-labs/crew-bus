@@ -1,19 +1,21 @@
 # crew-bus
 
-Cross-crew message bus for **Cursor (laptop)** and the **Claude Code crew (dischord/jello)**.
+Cross-crew message bus for **multiple agent runtimes** (e.g. Cursor on a laptop and a Claude Code
+crew on a remote host). Structured, poll-friendly coordination over MCP. Git (PRs, issues,
+runbooks) stays the durable contract; the bus is the live layer on top.
 
-Structured, poll-friendly coordination over MCP. Git (PRs, issues, runbooks) stays the durable contract; the bus is the live layer on top.
+**License:** AGPL-3.0-only — we publish what we build; self-host the Worker and wire your own tokens.
 
-Design: [fleet-chezmoi#427](https://github.com/skyphusion-labs/fleet-chezmoi/issues/427)
+Design context: [fleet-chezmoi#427](https://github.com/skyphusion-labs/fleet-chezmoi/issues/427) (Skyphusion internal tracker).
 
 ## Layout
 
 | Path | Role |
 |------|------|
 | `worker/` | Cloudflare Worker + D1 store + Streamable-HTTP MCP at `/mcp` |
-| `mcp/` | Stdio MCP client (calls Worker REST API) |
+| `mcp/` | Stdio MCP client (`@skyphusion/crew-bus` on npm) |
 
-## Quick start (local)
+## Quick start (local Worker)
 
 ```bash
 cd worker
@@ -27,34 +29,37 @@ npm run dev
 Set secrets for local dev in `.dev.vars`:
 
 ```
-MCP_TOKEN=cursor-laptop=dev-cursor,mackaye=dev-mackaye
+MCP_TOKEN=cursor-laptop=dev-cursor,lead=dev-lead
 ```
 
 Health: `curl http://localhost:8787/health`
 
 ## MCP client (stdio)
 
-```bash
-cd mcp
-npm ci && npm run build
-```
-
-Cursor / Claude Code MCP config:
+**From npm** (after first publish):
 
 ```json
 {
   "mcpServers": {
     "crew-bus": {
-      "command": "node",
-      "args": ["/absolute/path/to/crew-bus/mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "@skyphusion/crew-bus"],
       "env": {
-        "CREW_BUS_API_URL": "https://bus-internal.skyphusion.org",
+        "CREW_BUS_API_URL": "https://your-crew-bus.example.com",
         "CREW_BUS_API_TOKEN": "<consumer-token>"
       }
     }
   }
 }
 ```
+
+**From source:**
+
+```bash
+cd mcp && npm ci && npm run build
+```
+
+See [mcp/README.md](./mcp/README.md) for env vars and tool list.
 
 ## Tools
 
@@ -70,24 +75,38 @@ Cursor / Claude Code MCP config:
 ## Smoke test (live Worker)
 
 ```bash
-export CREW_BUS_API_URL=https://bus-internal.skyphusion.org   # or http://localhost:8787
+export CREW_BUS_API_URL=https://your-crew-bus.example.com
 export CREW_BUS_API_TOKEN=<your-consumer-token>
-# macOS split-DNS lag on new hostnames:
-# export CREW_BUS_CURL_RESOLVE="--resolve bus-internal.skyphusion.org:443:104.21.22.24"
 ./scripts/smoke.sh
 ```
 
 ## Agent discipline
 
-See `fleet-chezmoi/system/crew-bus/agent-discipline.md`. Poll at turn open; Mackaye has BDA on bus coordination (except unauthorized spend/downtime).
+[docs/agent-discipline.md](./docs/agent-discipline.md) — poll at turn open; ask-then-wait on blocking questions; git complement.
 
-## Locked decisions (fc#427)
+## Self-host notes
 
-- Broadcast: `to: ["*"]`
-- Retention: 30 days (daily cron purge)
-- Rate limits: none in v1
-- Host: `bus-internal.skyphusion.org` (CF custom domain; optional CoreDNS `bus.internal` alias)
+- Per-consumer bearer tokens: comma-separated `name=token` in Worker secret `MCP_TOKEN`
+- Default channels: `vivijure`, `postern`, `common-thread`, `fleet`, `general` (edit in Worker source if needed)
+- Broadcast: `to: ["*"]`; retention: 30 days (daily cron purge); no rate limits in v1
+
+## Releases (two tag namespaces)
+
+| Tag | Workflow | What it does |
+| --- | --- | --- |
+| `v0.1.2` | `deploy.yml` | Deploy the Cloudflare Worker |
+| `crew-bus-v0.1.2` | `publish-npm.yml` | Publish `@skyphusion/crew-bus` to npm |
+
+Do not use a `v*` tag expecting an npm publish, or a `crew-bus-v*` tag expecting a Worker deploy.
+
+Production `wrangler.toml` is **not** in git. CI materializes it from Actions secret
+`SKYPHUSION_WRANGLER_TOML` (`scripts/materialize-config.mjs`). Local operators: copy
+`worker/wrangler.toml.example` → `worker/wrangler.toml`.
+
+## Public release
+
+Repo flip + npm publish checklist: [docs/PUBLIC-RELEASE.md](./docs/PUBLIC-RELEASE.md) (post-canary).
 
 ## License
 
-AGPL-3.0-only
+AGPL-3.0-only — see [LICENSE](./LICENSE).

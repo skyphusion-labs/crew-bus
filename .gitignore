@@ -6,5 +6,10 @@ dist/
 *.log
 .DS_Store
 
+# Production topology (D1 id + custom domain) — CI materializes from
+# SKYPHUSION_WRANGLER_TOML. Keep a local copy for operators; never commit.
+wrangler.toml
+worker/wrangler.toml
+
 worker-configuration.d.ts
 worker/.deploy-tokens.env

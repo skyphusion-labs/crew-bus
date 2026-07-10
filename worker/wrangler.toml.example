@@ -1,11 +1,12 @@
 # crew-bus Worker — wrangler config example.
 # Copy to wrangler.toml and fill D1 database_id after: wrangler d1 create crew-bus
 #
+# Production config is NOT committed. CI materializes it from the
+# SKYPHUSION_WRANGLER_TOML Actions secret (see scripts/materialize-config.mjs).
+#
 # Secrets (wrangler secret put):
 #   MCP_TOKEN — comma-separated per-consumer tokens, e.g.:
-#     cursor-laptop=...,mackaye=...,strummer=...
-#
-# Internal-first: route bus.internal via fleet DNS / tunnel when deploying.
+#     alice=...,bob=...
 
 name = "crew-bus"
 main = "src/index.ts"
@@ -28,8 +29,7 @@ crons = ["0 4 * * *"]
 [vars]
 RETENTION_DAYS = "30"
 
-# Internal host — CF custom domain (bearer-gated; WARP/laptop/crew reachable).
-# CoreDNS `bus.internal` alias is optional follow-up; use this hostname in MCP config.
-[[routes]]
-pattern = "bus-internal.skyphusion.org"
-custom_domain = true
+# Optional custom domain (or use workers.dev / your own tunnel):
+# [[routes]]
+# pattern = "crew-bus.example.com"
+# custom_domain = true

@@ -1,9 +1,32 @@
 {
-  "name": "crew-bus-mcp",
+  "name": "@skyphusion/crew-bus",
   "version": "0.1.2",
-  "description": "Stdio MCP client for crew-bus (REST API over the Worker)",
+  "description": "Stdio MCP client for crew-bus — structured cross-agent coordination over a bearer-gated Cloudflare Worker",
   "license": "AGPL-3.0-only",
+  "author": "Conrad Rockenhaus <conrad@skyphusion.org>",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/skyphusion-labs/crew-bus.git",
+    "directory": "mcp"
+  },
+  "homepage": "https://github.com/skyphusion-labs/crew-bus/tree/main/mcp#readme",
+  "bugs": {
+    "url": "https://github.com/skyphusion-labs/crew-bus/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "crew-bus",
+    "agent-coordination",
+    "cursor",
+    "claude-code",
+    "cloudflare-workers"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "bin": {
     "crew-bus-mcp": "dist/index.js"
   },
@@ -18,7 +41,8 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

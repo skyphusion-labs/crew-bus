@@ -17,10 +17,13 @@ concurrency:
 # npm workspaces: single root package-lock.json. Install once at repo root,
 # then run each package's scripts from its working-directory (node_modules
 # is hoisted / linked by the workspace install).
+#
+# PUBLIC-repo rule (fc#394): GitHub-hosted runners only. Org fleet pool has
+# allows_public_repositories=false so fork PRs never execute on fleet iron.
 
 jobs:
   worker:
-    runs-on: [self-hosted, fleet]
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: worker
@@ -38,7 +41,7 @@ jobs:
       - run: npm test
 
   mcp:
-    runs-on: [self-hosted, fleet]
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: mcp

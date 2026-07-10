@@ -1,0 +1,64 @@
+name: Publish npm package
+
+# Publish @skyphusion/crew-bus (stdio MCP client) to the public npm registry.
+# Tag push: git tag crew-bus-v0.1.2 && git push origin crew-bus-v0.1.2
+# Or: workflow_dispatch (uses version in mcp/package.json).
+#
+# Required repo secret: NPM_TOKEN (npmjs.com automation token with publish scope
+# for the @skyphusion org). Do not run until after PUBLIC-RELEASE.md checklist.
+
+on:
+  push:
+    tags:
+      - "crew-bus-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: npm publish @skyphusion/crew-bus
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+
+      - name: Install (workspace root)
+        working-directory: .
+        run: npm ci
+
+      - run: npm run typecheck && npm test && npm run build
+
+      - name: Verify tag matches package version
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          tag="${tag#crew-bus-v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "Tag crew-bus-v$tag does not match mcp/package.json version $pkg" >&2
+            exit 1
+          fi
+
+      - name: Publish to npm
+        run: |
+          set -euo pipefail
+          pkg="$(node -p "require('./package.json').name")"
+          ver="$(node -p "require('./package.json').version")"
+          if npm view "${pkg}@${ver}" version >/dev/null 2>&1; then
+            echo "Skip: ${pkg}@${ver} already published"
+            exit 0
+          fi
+          npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
