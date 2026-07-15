@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.4.1
+
+Maintenance release. No Worker runtime or API change; cut so the deployed Worker is
+re-shipped from current `main` (the only deploy path is a `v*` tag) and to validate the
+toolchain bump deploys cleanly.
+
+- chore(deps): bump `wrangler` devDep 4.108.0 -> 4.111.0 (#31).
+- ci: dispatch corpus-sync to search-mcp on merge to `main`.
+
 ## 0.4.0
 
 ### #26 -- doorbell webhooks
