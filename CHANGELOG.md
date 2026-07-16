@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.4.2
+
+Behavioral clarity for recipients of `handoff`/`ruling` (no runtime API change):
+
+- MCP tool descriptions (`bus_send`, `bus_poll`, `bus_ack`) on stdio client and Worker remote
+  `/mcp`: `requires_ack` on handoff/ruling is a delivery receipt; recipients ack then continue
+  work the same turn. End-and-wait only after your own `type=question`.
+- docs: rewrite agent-discipline authority section (authenticated lead tasking is authority;
+  only relayed operator claims need verify for spend/downtime/irreversible).
+
 ## 0.4.1
 
 Maintenance release. No Worker runtime or API change; cut so the deployed Worker is

@@ -27,10 +27,13 @@ const TOOLS = [
     description:
       "Post a structured message to a crew-bus channel. Use to: [\"*\"] to broadcast. " +
       "Recipients are validated against the registered roster (bus_consumers): a send to an " +
-      "unknown/retired name fails loudly rather than vanishing. Set requires_ack for coordination " +
-      "gates; type=ruling and type=handoff default requires_ack=true (pass false to opt out). " +
-      "Include refs (repo, issue, branch, pr) when relevant; refs.issue and refs.pr are " +
-      "canonical BARE numbers (\"42\", not \"#42\"; a leading # is stripped on write).",
+      "unknown/retired name fails loudly rather than vanishing. type=ruling and type=handoff " +
+      "default requires_ack=true (pass false to opt out): that flag is a DELIVERY RECEIPT for the " +
+      "sender, not a cue for the recipient to idle until a human confirms. Recipients of " +
+      "handoff/ruling should ack then begin work the same turn. type=question + requires_ack is " +
+      "the blocking gate (sender ends turn and waits). Include refs (repo, issue, branch, pr) when " +
+      "relevant; refs.issue and refs.pr are canonical BARE numbers (\"42\", not \"#42\"; a leading " +
+      "# is stripped on write).",
     inputSchema: {
       type: "object",
       properties: {
@@ -68,7 +71,9 @@ const TOOLS = [
       "messages. Own sends are not echoed back. Poll at turn open and after asking blocking questions. " +
       "The response also carries pending_acks: messages addressed to you with requires_ack that you " +
       "have not acked, ALWAYS included regardless of the cursor (each marked pending_ack:true) until " +
-      "you bus_ack them, so a dropped ack-gated message re-surfaces instead of vanishing.",
+      "you bus_ack them, so a dropped ack-gated message re-surfaces instead of vanishing. " +
+      "pending_acks on type=handoff/ruling are WORK ORDERS: ack then continue executing in the same " +
+      "turn; they are not a stop signal to wait for a human.",
     inputSchema: {
       type: "object",
       properties: {
@@ -121,7 +126,10 @@ const TOOLS = [
   },
   {
     name: "bus_ack",
-    description: "Acknowledge a message (records ack + posts ack-type reply to sender).",
+    description:
+      "Acknowledge a message (records ack + posts ack-type reply to sender). For type=handoff or " +
+      "type=ruling, ack then CONTINUE WORK in the same turn (ack is a delivery receipt, not the " +
+      "job). End-turn-and-wait only after YOU sent a type=question with requires_ack.",
     inputSchema: {
       type: "object",
       properties: {
