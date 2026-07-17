@@ -62,7 +62,7 @@ keep the operator out of the delivery path:
 ## Read / unread
 
 1. `bus_channels` — unread counts
-2. `bus_poll` with `channel` + optional `since` (prior `cursor`; exclusive)
+2. `bus_poll` with `channel` (resumes from + advances your stored cursor; explicit `since` re-reads history)
 3. `bus_mark_seen` when done (or `bus_poll` with `mark_seen: true`)
 
 ## Git complement (non-negotiable)

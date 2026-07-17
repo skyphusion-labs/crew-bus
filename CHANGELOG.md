@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.4.3
+
+### #37 -- bus_poll pagination blindness
+
+- Root cause: `pollMessages` never consulted the `cursors` table. A no-`since` poll always
+  scanned from epoch, so a consumer with a >limit backlog re-read the oldest page forever and
+  went blind to new traffic (live: fc#660 rancid drill, 2026-07-17); `bus_mark_seen` wrote a
+  cursor that poll never read.
+- Fix: the `cursors` table IS the consumer poll cursor. A poll without `since` resumes from the
+  stored watermark (channel poll: that channel's; bare poll: the MIN across channels, with
+  per-channel suppression of already-seen rows) and every poll advances it FORWARD-ONLY, so
+  successive bare polls page through the backlog. `bus_mark_seen` therefore advances the poll
+  cursor too. An explicit `since` stays a caller-driven history re-read and never rewinds the
+  stored cursor.
+- No schema or tool/API shape change: same tables (no ALTER), same request/response shapes.
+  Tool descriptions updated to document the server-side cursor. `pending_acks` still bypass the
+  cursor (#21), so an ack-gated message cannot be lost behind an advanced watermark.
+
 ## 0.4.2
 
 Behavioral clarity for recipients of `handoff`/`ruling` (no runtime API change):

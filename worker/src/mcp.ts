@@ -65,9 +65,11 @@ const TOOLS = [
   {
     name: "bus_poll",
     description:
-      "Fetch messages visible to the authenticated consumer since an ISO timestamp (exclusive: " +
-      "pass the prior poll's cursor as since to avoid duplicates; a null cursor with an empty " +
-      "channel means nothing new). Ordered oldest-first; check the priority field for blocking " +
+      "Fetch messages visible to the authenticated consumer. Omit since to resume from your " +
+      "stored server-side cursor: each poll advances it (forward-only), so bare polls page forward " +
+      "through a backlog; bus_mark_seen also advances it. Pass an explicit since (ISO, exclusive; " +
+      "e.g. a prior cursor) to re-read history without moving the stored cursor. Ordered " +
+      "oldest-first; check the priority field for blocking " +
       "messages. Own sends are not echoed back. Poll at turn open and after asking blocking questions. " +
       "The response also carries pending_acks: messages addressed to you with requires_ack that you " +
       "have not acked, ALWAYS included regardless of the cursor (each marked pending_ack:true) until " +
@@ -93,8 +95,8 @@ const TOOLS = [
   {
     name: "bus_mark_seen",
     description:
-      "Mark a channel read for the authenticated consumer (clears unread count). " +
-      "Defaults to latest visible message in the channel.",
+      "Mark a channel read for the authenticated consumer (clears unread count and advances your " +
+      "poll cursor past the marked point). Defaults to latest visible message in the channel.",
     inputSchema: {
       type: "object",
       properties: {

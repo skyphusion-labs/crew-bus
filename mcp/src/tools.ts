@@ -91,7 +91,9 @@ export const TOOLS: ToolDef[] = [
   {
     name: "bus_poll",
     description:
-      "Fetch messages since an ISO timestamp (exclusive: use prior cursor as since). " +
+      "Fetch messages. Omit since to resume from your stored server-side cursor (advanced by " +
+      "each poll and by bus_mark_seen, so bare polls page forward through a backlog); pass since " +
+      "(ISO, exclusive) to re-read history without moving it. " +
       "Ordered oldest-first; check the priority field for blocking messages. Own sends are not " +
       "echoed back. Poll at turn open; use mark_seen on channel poll to clear unread. The response also " +
       "carries pending_acks: requires_ack messages addressed to you that you have not acked, ALWAYS " +
@@ -170,7 +172,8 @@ export const TOOLS: ToolDef[] = [
   {
     name: "bus_mark_seen",
     description:
-      "Mark a channel read (clears unread). Omit last_seen_at to mark through latest visible message.",
+      "Mark a channel read (clears unread, advances your poll cursor). Omit last_seen_at to mark " +
+      "through latest visible message.",
     inputSchema: markSeenSchema,
     handler: (client, a) =>
       client.markSeen(String(a.channel), a.last_seen_at as string | undefined),

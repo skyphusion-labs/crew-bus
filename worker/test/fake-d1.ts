@@ -329,6 +329,14 @@ export function makeFakeD1(
           const rows = filterPollRows(state.messages, since ?? "1970-01-01T00:00:00.000Z", undefined, false, limit);
           return { results: rows as T[] };
         }
+        // #37: a consumer's per-channel poll cursors.
+        if (/SELECT channel, last_seen_at FROM cursors WHERE consumer = \?/i.test(sql)) {
+          const consumer = bound[0] as string;
+          const rows = state.cursors
+            .filter((c) => c.consumer === consumer)
+            .map((c) => ({ channel: c.channel, last_seen_at: c.last_seen_at }));
+          return { results: rows as T[] };
+        }
         return { results: [] as T[] };
       },
     };

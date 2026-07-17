@@ -322,6 +322,20 @@ export async function listConsumers(db: D1Database, names: string[]): Promise<Co
   }));
 }
 
+// #37: the cursors table IS the consumer poll cursor. Load this consumer's
+// per-channel watermarks (rows with a null last_seen_at count as absent).
+async function loadCursors(db: D1Database, consumer: string): Promise<Map<Channel, string>> {
+  const { results } = await db
+    .prepare(`SELECT channel, last_seen_at FROM cursors WHERE consumer = ?`)
+    .bind(consumer)
+    .all<{ channel: string; last_seen_at: string | null }>();
+  const map = new Map<Channel, string>();
+  for (const row of results ?? []) {
+    if (isChannel(row.channel) && row.last_seen_at) map.set(row.channel, row.last_seen_at);
+  }
+  return map;
+}
+
 export async function pollMessages(
   db: D1Database,
   consumer: string,
@@ -329,17 +343,38 @@ export async function pollMessages(
 ): Promise<{ messages: BusMessage[]; cursor: string | null; pending_acks: PendingAckMessage[] }> {
   await recordPoll(db, consumer);
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
-  // Exclusive since: pass the prior poll's cursor as `since` to avoid duplicates.
-  const sinceClause = opts.since
-    ? "created_at > ?"
-    : "created_at >= COALESCE(?, '1970-01-01T00:00:00.000Z')";
-  let query = `SELECT * FROM messages WHERE ${sinceClause}`;
-  const binds: unknown[] = [opts.since ?? null];
+  if (opts.channel && !isChannel(opts.channel)) {
+    throw new BusError(`invalid channel: ${opts.channel}`);
+  }
+  const channel = opts.channel as Channel | undefined;
+  const explicitSince = opts.since ? opts.since : undefined;
 
-  if (opts.channel) {
-    if (!isChannel(opts.channel)) throw new BusError(`invalid channel: ${opts.channel}`);
+  // #37 (fc#660 drill): a poll WITHOUT since resumes from the stored consumer
+  // cursor, so successive bare polls page FORWARD through a backlog instead of
+  // re-reading the oldest page forever. A channel poll resumes from that
+  // channel's watermark; a bare poll resumes from the MIN across all channels
+  // (any channel without a watermark yet means scan from epoch). An explicit
+  // since stays a caller-driven override (history re-read), honored verbatim.
+  const stored = await loadCursors(db, consumer);
+  let since: string | null;
+  if (explicitSince !== undefined) {
+    since = explicitSince;
+  } else if (channel) {
+    since = stored.get(channel) ?? null;
+  } else {
+    since = CHANNELS.every((c) => stored.has(c)) ? [...stored.values()].sort()[0]! : null;
+  }
+
+  // Exclusive since: the watermark (stored or caller-passed) is the last row
+  // already delivered or marked seen.
+  const sinceClause =
+    since !== null ? "created_at > ?" : "created_at >= COALESCE(?, '1970-01-01T00:00:00.000Z')";
+  let query = `SELECT * FROM messages WHERE ${sinceClause}`;
+  const binds: unknown[] = [since];
+
+  if (channel) {
     query += ` AND channel = ?`;
-    binds.push(opts.channel);
+    binds.push(channel);
   }
 
   // Scan strictly in created_at order: the cursor is a time watermark, and any
@@ -352,9 +387,20 @@ export async function pollMessages(
 
   const { results } = await db.prepare(query).bind(...binds).all<MessageRow>();
   const raw = (results ?? []).map(rowToMessage);
+  // #37: on a bare no-since poll the MIN lower bound re-scans channels whose
+  // own watermark sits ahead of it; rows at or before their channel watermark
+  // were already delivered or marked seen, so suppress the re-delivery. Never
+  // applied when the caller passed an explicit since (history re-read).
+  const seenBefore = (m: BusMessage): boolean => {
+    if (explicitSince !== undefined) return false;
+    const watermark = stored.get(m.channel);
+    return watermark !== undefined && m.created_at <= watermark;
+  };
   // Own sends are excluded from poll results (bus_send already returned them)
   // but still advance the cursor below via the raw scan window.
-  const visible = raw.filter((m) => isVisibleTo(m.to, consumer) && m.from !== consumer);
+  const visible = raw.filter(
+    (m) => isVisibleTo(m.to, consumer) && m.from !== consumer && !seenBefore(m),
+  );
   const messages = visible.slice(0, limit);
 
   // Lossless cursor: if the page truncated, stop at the last RETURNED message;
@@ -367,6 +413,23 @@ export async function pollMessages(
   } else if (raw.length) {
     cursor = raw[raw.length - 1]!.created_at;
   }
+
+  // #37: persist the watermark FORWARD-ONLY so the next bare poll resumes
+  // where this one stopped, and an explicit-since history re-read never
+  // rewinds it. A bare poll scanned every channel up to the cursor, so every
+  // channel watermark advances; a dropped page cannot lose an ack-gated
+  // message because pending_acks bypass the cursor entirely (#21).
+  if (cursor !== null) {
+    const advanceTo = cursor;
+    const touched: readonly Channel[] = channel ? [channel] : CHANNELS;
+    for (const ch of touched) {
+      const prev = stored.get(ch);
+      if (prev === undefined || advanceTo > prev) {
+        await markChannelSeen(db, consumer, ch, advanceTo);
+      }
+    }
+  }
+
   const pending_acks = await pendingAcksFor(db, consumer, opts.channel);
   return { messages, cursor, pending_acks };
 }
