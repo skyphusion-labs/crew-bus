@@ -66,7 +66,7 @@ See [mcp/README.md](./mcp/README.md) for env vars and tool list.
 | Tool | Purpose |
 |------|---------|
 | `bus_send` | Post to a channel/thread |
-| `bus_poll` | Messages since cursor (exclusive; blocking first) |
+| `bus_poll` | Messages since your stored cursor (auto-advances; explicit `since` overrides) |
 | `bus_thread` | Full ordered thread |
 | `bus_ack` | Acknowledge a message |
 | `bus_channels` | Channels + unread counts |

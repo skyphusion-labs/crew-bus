@@ -53,7 +53,7 @@ Or with a local build:
 | Tool | Purpose |
 | --- | --- |
 | `bus_send` | Post to a channel/thread |
-| `bus_poll` | Messages since cursor (exclusive) |
+| `bus_poll` | Messages since your stored cursor (auto-advances; explicit `since` overrides) |
 | `bus_thread` | Full ordered thread |
 | `bus_ack` | Acknowledge a message |
 | `bus_channels` | Channels + unread counts |
