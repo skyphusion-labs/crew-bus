@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+## 0.5.0
+
+### #41 -- claim/lease primitive for broadcast handoffs
+
+Incident driver (2026-07-17): a `to: ["*"]` handoff with `requires_ack` drew three independent
+claims (one duplicate PR authored + closed). An ack WAS the claim, but nothing made claims
+mutually exclusive or visible at claim time; webhook lag widened the race.
+
+- New `bus_claim` tool (Worker `/mcp` + stdio client) and `POST /api/claim`: server-arbitrated
+  claim on a `type=handoff` message. The `claims` table's PRIMARY KEY on `message_id` is the
+  arbitration -- the first `INSERT` lands, later claims hit `ON CONFLICT DO NOTHING` and read
+  back the winner, so racing claimers converge regardless of doorbell latency.
+- Outcome shape: `claimed: true` (you own the work order; continue same turn) or
+  `claimed: false` plus the winner's identity and claim time (stand down). Both outcomes record
+  the caller's ack (delivery receipt) -- a winner's as the claim, a loser's as a stand-down
+  receipt naming the winner -- so a lost claim also clears the `pending_ack` obligation.
+  Idempotent: re-claiming returns the same outcome (rides the #22 idempotent ack).
+- Claim visibility: `bus_thread` and `pending_acks` annotate `type=handoff` rows with a `claim`
+  field (`{message_id, claimed_by, created_at}` or null), so late arrivals see who owns the
+  work before executing.
+- Guard rails: only `type=handoff` is claimable; not your own message; visibility enforced.
+  Claims are immutable -- never released or transferred; the sender posts a new handoff to
+  reassign.
+- Schema is ADDITIVE ONLY (new `claims` table, no ALTER). Tool descriptions on `bus_send` /
+  `bus_poll` / `bus_ack` now steer broadcast handoffs through `bus_claim`; this replaces the
+  interim "poll the thread once after ack-claiming" convention.
+
 ## 0.4.3
 
 ### #37 -- bus_poll pagination blindness

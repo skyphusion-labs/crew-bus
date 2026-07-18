@@ -83,8 +83,9 @@ export const TOOLS: ToolDef[] = [
       "(pass false to opt out): that flag is a DELIVERY RECEIPT for the sender, not a cue for the " +
       "recipient to idle until a human confirms. Recipients of handoff/ruling should ack then begin " +
       "work the same turn. type=question + requires_ack is the blocking gate (sender ends turn and " +
-      "waits). refs.issue and refs.pr are canonical BARE numbers (\"42\", not \"#42\"; a leading # " +
-      "is stripped on write).",
+      "waits). A BROADCAST handoff (to: [\"*\"]) is a race: recipients must bus_claim it before " +
+      "executing (first claim wins server-side). refs.issue and refs.pr are canonical BARE numbers " +
+      "(\"42\", not \"#42\"; a leading # is stripped on write).",
     inputSchema: sendSchema,
     handler: (client, a) => client.send(a),
   },
@@ -99,7 +100,8 @@ export const TOOLS: ToolDef[] = [
       "carries pending_acks: requires_ack messages addressed to you that you have not acked, ALWAYS " +
       "included regardless of the cursor (each marked pending_ack:true) until you bus_ack them. " +
       "pending_acks on type=handoff/ruling are WORK ORDERS: ack then continue executing in the same " +
-      "turn; they are not a stop signal to wait for a human.",
+      "turn; they are not a stop signal to wait for a human. A pending BROADCAST handoff must be " +
+      "bus_claim'd before executing; its claim field (when present) shows who already won it.",
     inputSchema: pollSchema,
     handler: (client, a) =>
       client.poll({
@@ -123,9 +125,22 @@ export const TOOLS: ToolDef[] = [
     description:
       "Acknowledge a message (records ack + posts ack-type reply to sender). For type=handoff or " +
       "type=ruling, ack then CONTINUE WORK in the same turn (ack is a delivery receipt, not the " +
-      "job). End-turn-and-wait only after YOU sent a type=question with requires_ack.",
+      "job). For a BROADCAST handoff (to includes \"*\"), use bus_claim instead: a plain ack does " +
+      "NOT reserve the work. End-turn-and-wait only after YOU sent a type=question with requires_ack.",
     inputSchema: ackSchema,
     handler: (client, a) => client.ack(String(a.message_id), a.body as string | undefined),
+  },
+  {
+    name: "bus_claim",
+    description:
+      "Claim a type=handoff message BEFORE starting the work (mandatory for broadcast handoffs). " +
+      "Server-arbitrated: the FIRST claim wins atomically; a late claim returns claimed:false with " +
+      "the winner's identity. claimed:true = you own the work order, continue executing the same " +
+      "turn. claimed:false = STAND DOWN, do not start the work. Either outcome records your ack " +
+      "(delivery receipt), so a lost claim also clears your pending_ack obligation. Idempotent; " +
+      "claims are never released or transferred (the sender posts a new handoff to reassign).",
+    inputSchema: ackSchema,
+    handler: (client, a) => client.claim(String(a.message_id), a.body as string | undefined),
   },
   {
     name: "bus_channels",

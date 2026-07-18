@@ -4,6 +4,7 @@ import { BusError, clientErrorMessage } from "./bus-error";
 import { CHANNELS, isChannel } from "./bus-types";
 import {
   ackMessage,
+  claimMessage,
   deleteWebhook,
   fireWebhooks,
   getThread,
@@ -90,6 +91,20 @@ export async function handleApi(
       if (!messageId) throw new BusError("message_id is required");
       const message = await ackMessage(env.DB, consumer, messageId, body.body ? String(body.body) : undefined);
       return json({ ok: true, message });
+    }
+
+    // #41: server-arbitrated claim on a handoff (first claim wins).
+    if (pathname === "/api/claim" && request.method === "POST") {
+      const body = await readJson(request);
+      const messageId = String(body.message_id ?? "").trim();
+      if (!messageId) throw new BusError("message_id is required");
+      const outcome = await claimMessage(
+        env.DB,
+        consumer,
+        messageId,
+        body.body ? String(body.body) : undefined,
+      );
+      return json({ ok: true, ...outcome });
     }
 
     if (pathname === "/api/channels" && request.method === "GET") {
