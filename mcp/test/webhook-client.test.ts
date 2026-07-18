@@ -42,4 +42,27 @@ describe("CrewBusClient webhook methods (#26)", () => {
       secret: "fake-secret",
     });
   });
+  it("forwards a vpc target verbatim to PUT /api/webhook (#40)", async () => {
+    const calls: { method: string; url: string; body?: string }[] = [];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({
+        method: String(init?.method),
+        url: String(url),
+        body: init?.body ? String(init.body) : undefined,
+      });
+      return jsonResponse({ ok: true });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new CrewBusClient("https://bus.example", "tok");
+    await client.webhookSet({ vpc: { binding: "DISCHORD_DOORBELL_VPC" }, secret: "fake-secret" });
+
+    expect(calls[0]!.method).toBe("PUT");
+    expect(calls[0]!.url).toBe("https://bus.example/api/webhook");
+    // The vpc target is forwarded untouched; the server validates + keys on the bearer.
+    expect(JSON.parse(calls[0]!.body!)).toEqual({
+      vpc: { binding: "DISCHORD_DOORBELL_VPC" },
+      secret: "fake-secret",
+    });
+  });
 });

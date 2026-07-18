@@ -331,3 +331,213 @@ describe("webhook firing (#26)", () => {
     expect(delivery[0]).toMatchObject({ recipient: "albini", webhook_attempts: 0, webhook_delivered_at: null });
   });
 });
+
+// ---------------------------------------------------------------------------
+// #40 dual-path doorbell delivery: private Workers VPC targets
+// ---------------------------------------------------------------------------
+
+const VPC_BINDING = "DISCHORD_DOORBELL_VPC";
+
+/** A fake Workers VPC binding: a Fetcher recording every ring. */
+function fakeVpcBinding(status = 204) {
+  const calls: { url: string; init: RequestInit }[] = [];
+  const fetch = vi.fn(async (url: string, init: RequestInit) => {
+    calls.push({ url, init });
+    return new Response(null, { status });
+  });
+  return { binding: { fetch } as unknown as Fetcher, calls };
+}
+
+describe("webhook vpc target validation (#40)", () => {
+  it("registers a vpc endpoint: view shows target_kind vpc, binding, null url, masks secret", async () => {
+    const db = makeFakeD1(freshState());
+    const view = await setWebhook(db, "mackaye", {
+      vpc: { binding: VPC_BINDING },
+      secret: "vpc-sign-fake",
+    });
+    expect(view).toMatchObject({
+      consumer: "mackaye",
+      target_kind: "vpc",
+      vpc_binding: VPC_BINDING,
+      url: null,
+      enabled: true,
+      secret_set: true,
+    });
+    expect(JSON.stringify(view)).not.toContain("vpc-sign-fake");
+    // Internal getter carries the secret + target for signing/routing.
+    const internal = await getWebhook(db, "mackaye");
+    expect(internal!.target_kind).toBe("vpc");
+    expect(internal!.vpc_binding).toBe(VPC_BINDING);
+    expect(internal!.url).toBe("");
+    expect(internal!.secret).toBe("vpc-sign-fake");
+  });
+
+  it("rejects an unknown (non-allowlisted) vpc binding", async () => {
+    const db = makeFakeD1(freshState());
+    await expect(
+      setWebhook(db, "mackaye", { vpc: { binding: "NOPE_VPC" }, secret: "fake" }),
+    ).rejects.toThrow(/unknown vpc binding/);
+  });
+
+  it("rejects both url and vpc (exactly one target)", async () => {
+    const db = makeFakeD1(freshState());
+    await expect(
+      setWebhook(db, "mackaye", {
+        url: "https://recv.example/hook",
+        vpc: { binding: VPC_BINDING },
+        secret: "fake",
+      }),
+    ).rejects.toThrow(/exactly one/i);
+  });
+
+  it("rejects neither url nor vpc", async () => {
+    const db = makeFakeD1(freshState());
+    await expect(setWebhook(db, "mackaye", { secret: "fake" })).rejects.toThrow(/target is required/i);
+  });
+
+  it("rejects a vpc.consumer that is not the registering consumer (no cross-seat)", async () => {
+    const db = makeFakeD1(freshState());
+    await expect(
+      setWebhook(db, "mackaye", { vpc: { binding: VPC_BINDING, consumer: "albini" }, secret: "fake" }),
+    ).rejects.toThrow(/must match your own consumer/);
+    // Own consumer is accepted.
+    const view = await setWebhook(db, "mackaye", {
+      vpc: { binding: VPC_BINDING, consumer: "mackaye" },
+      secret: "fake",
+    });
+    expect(view.target_kind).toBe("vpc");
+  });
+
+  it("a vpc endpoint still requires a secret (HMAC key)", async () => {
+    const db = makeFakeD1(freshState());
+    await expect(
+      setWebhook(db, "mackaye", { vpc: { binding: VPC_BINDING }, secret: "" }),
+    ).rejects.toThrow(/secret is required/);
+  });
+
+  it("bus_consumers webhook flag: true for an enabled vpc endpoint", async () => {
+    const db = makeFakeD1(freshState());
+    await setWebhook(db, "mackaye", { vpc: { binding: VPC_BINDING }, secret: "fake" });
+    const consumers = await listConsumers(db, ["mackaye", "albini"]);
+    expect(consumers.find((c) => c.name === "mackaye")!.webhook).toBe(true);
+  });
+});
+
+describe("webhook vpc firing (#40)", () => {
+  it("rings through the VPC binding at /ring/<consumer>, signed + body-less, records delivery", async () => {
+    const state = freshState();
+    const db = makeFakeD1(state);
+    const roster = ["mackaye", "albini"];
+    await setWebhook(db, "mackaye", { vpc: { binding: VPC_BINDING }, secret: "vpc-key-fake" });
+
+    const { binding, calls } = fakeVpcBinding(204);
+    // A url-path fetch must NOT be used for a vpc endpoint.
+    const urlFetch = vi.fn(async () => new Response(null, { status: 200 })) as unknown as typeof fetch;
+
+    const msg = await sendMessage(
+      db,
+      "albini",
+      { channel: "general", to: ["mackaye"], type: "status", body: "heads up" },
+      roster,
+    );
+    await fireWebhooks(
+      { DB: db, [VPC_BINDING]: binding } as unknown as Env,
+      msg,
+      roster,
+      { fetchImpl: urlFetch, sleep: noSleep },
+    );
+
+    // Rung via the binding, never the url fetch.
+    expect(urlFetch).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe(`https://doorbell.local/ring/mackaye`);
+
+    const headers = calls[0]!.init.headers as Record<string, string>;
+    const rawBody = String(calls[0]!.init.body);
+    const payload = JSON.parse(rawBody);
+    // Body-less doorbell: pointers only, no message content.
+    expect(payload).toEqual({
+      message_id: msg.id,
+      channel: "general",
+      thread_id: msg.thread_id,
+      sent_at: msg.created_at,
+    });
+    expect(payload.body).toBeUndefined();
+
+    // HMAC present on the vpc path, computed exactly as the store does.
+    expect(headers["X-Bus-Consumer"]).toBe("mackaye");
+    expect(/^[0-9]+$/.test(headers["X-Bus-Timestamp"]!)).toBe(true);
+    const expected = `sha256=${await hmacHex("vpc-key-fake", `${headers["X-Bus-Timestamp"]}.${rawBody}`)}`;
+    expect(headers["X-Bus-Signature"]).toBe(expected);
+
+    expect(state.webhook_deliveries![0]).toMatchObject({
+      message_id: msg.id,
+      consumer: "mackaye",
+      attempts: 1,
+      last_status: 204,
+    });
+    expect(state.webhook_deliveries![0]!.delivered_at).not.toBeNull();
+  });
+
+  it("url rows are unaffected: a url endpoint uses the url fetch, never a binding", async () => {
+    const db = makeFakeD1(freshState());
+    const roster = ["mackaye", "albini"];
+    await setWebhook(db, "albini", { url: "https://recv.example/hook", secret: "fake" });
+
+    const { binding, calls } = fakeVpcBinding(204);
+    const captured: string[] = [];
+    const urlFetch = vi.fn(async (url: string) => {
+      captured.push(url);
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch;
+
+    const msg = await sendMessage(
+      db,
+      "mackaye",
+      { channel: "general", to: ["albini"], type: "status", body: "x" },
+      roster,
+    );
+    await fireWebhooks(
+      { DB: db, [VPC_BINDING]: binding } as unknown as Env,
+      msg,
+      roster,
+      { fetchImpl: urlFetch, sleep: noSleep },
+    );
+    expect(captured).toEqual(["https://recv.example/hook"]);
+    expect(calls).toHaveLength(0); // binding never touched for a url row
+  });
+
+  it("retries a vpc ring up to 3 attempts on non-2xx, records attempts + last_status", async () => {
+    const state = freshState();
+    const db = makeFakeD1(state);
+    const roster = ["mackaye", "albini"];
+    await setWebhook(db, "mackaye", { vpc: { binding: VPC_BINDING }, secret: "fake" });
+    const { binding } = fakeVpcBinding(500);
+    await fireWebhooks(
+      { DB: db, [VPC_BINDING]: binding } as unknown as Env,
+      await sendMessage(db, "albini", { channel: "general", to: ["mackaye"], type: "status", body: "x" }, roster),
+      roster,
+      { fetchImpl: (async () => new Response(null, { status: 200 })) as unknown as typeof fetch, sleep: noSleep },
+    );
+    expect(state.webhook_deliveries![0]).toMatchObject({ attempts: 3, last_status: 500 });
+    expect(state.webhook_deliveries![0]!.delivered_at).toBeNull();
+  });
+
+  it("a registered-but-unprovisioned binding degrades to poll (no throw, attempts 0)", async () => {
+    const state = freshState();
+    const db = makeFakeD1(state);
+    const roster = ["mackaye", "albini"];
+    await setWebhook(db, "mackaye", { vpc: { binding: VPC_BINDING }, secret: "fake" });
+    // Env WITHOUT the binding (VPC service not provisioned on this deploy).
+    await expect(
+      fireWebhooks(
+        { DB: db } as unknown as Env,
+        await sendMessage(db, "albini", { channel: "general", to: ["mackaye"], type: "status", body: "x" }, roster),
+        roster,
+        { fetchImpl: (async () => new Response(null, { status: 200 })) as unknown as typeof fetch, sleep: noSleep },
+      ),
+    ).resolves.toBeUndefined();
+    expect(state.webhook_deliveries![0]).toMatchObject({ consumer: "mackaye", attempts: 0, last_status: 0 });
+    expect(state.webhook_deliveries![0]!.delivered_at).toBeNull();
+  });
+});

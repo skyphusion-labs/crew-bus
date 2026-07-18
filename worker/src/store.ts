@@ -1,4 +1,5 @@
 import { BusError } from "./bus-error";
+import { isVpcDoorbellBinding } from "./env";
 import type { Env } from "./env";
 import {
   type BusMessage,
@@ -21,6 +22,7 @@ import {
   MAX_TO_ENTRIES,
   MAX_TO_ENTRY_CHARS,
   MAX_WEBHOOK_SECRET_CHARS,
+  MAX_VPC_BINDING_CHARS,
   MAX_WEBHOOK_URL_CHARS,
   isChannel,
   isHttpsUrl,
@@ -719,7 +721,9 @@ export async function getMessage(db: D1Database, id: string): Promise<BusMessage
 
 interface WebhookEndpointRow {
   consumer: string;
+  target_kind: string;
   url: string;
+  vpc_binding: string | null;
   secret: string;
   auth_env: string | null;
   enabled: number;
@@ -730,7 +734,9 @@ interface WebhookEndpointRow {
 function rowToEndpoint(row: WebhookEndpointRow): WebhookEndpoint {
   return {
     consumer: row.consumer,
+    target_kind: row.target_kind === "vpc" ? "vpc" : "url",
     url: row.url,
+    vpc_binding: row.vpc_binding,
     secret: row.secret,
     auth_env: row.auth_env,
     enabled: row.enabled === 1,
@@ -743,7 +749,11 @@ function rowToEndpoint(row: WebhookEndpointRow): WebhookEndpoint {
 function toView(ep: WebhookEndpoint): WebhookEndpointView {
   return {
     consumer: ep.consumer,
-    url: ep.url,
+    target_kind: ep.target_kind,
+    // #40: a url endpoint keeps its populated url (existing readers unaffected);
+    // a vpc endpoint reports null url + its binding name.
+    url: ep.target_kind === "vpc" ? null : ep.url,
+    vpc_binding: ep.target_kind === "vpc" ? ep.vpc_binding : null,
     auth_env: ep.auth_env,
     enabled: ep.enabled,
     secret_set: true,
@@ -756,7 +766,7 @@ function toView(ep: WebhookEndpoint): WebhookEndpointView {
 export async function getWebhook(db: D1Database, consumer: string): Promise<WebhookEndpoint | null> {
   const row = await db
     .prepare(
-      `SELECT consumer, url, secret, auth_env, enabled, created_at, updated_at FROM webhook_endpoints WHERE consumer = ?`,
+      `SELECT consumer, target_kind, url, vpc_binding, secret, auth_env, enabled, created_at, updated_at FROM webhook_endpoints WHERE consumer = ?`,
     )
     .bind(consumer)
     .first<WebhookEndpointRow>();
@@ -772,25 +782,73 @@ export async function getWebhookView(
   return ep ? toView(ep) : null;
 }
 
+/** #40: a private Workers VPC doorbell target. `binding` names a declared VPC
+ * binding (allowlisted); `consumer`, if given, must match the registering consumer. */
+export interface WebhookVpcInput {
+  binding: string;
+  consumer?: string | null;
+}
+
 export interface WebhookInput {
-  url: string;
+  // #40 dual-path: provide EXACTLY ONE of `url` (public https) or `vpc` (private binding).
+  url?: string | null;
+  vpc?: WebhookVpcInput | null;
   secret: string;
   auth_env?: string | null;
   enabled?: boolean;
 }
 
-/** Register or replace a consumer's own endpoint. Rejects non-https. Returns the masked view. */
+/**
+ * Register or replace a consumer's own endpoint. Exactly one target: a public
+ * https `url`, or a private `vpc` binding (#40). Returns the masked view.
+ */
 export async function setWebhook(
   db: D1Database,
   consumer: string,
   input: WebhookInput,
 ): Promise<WebhookEndpointView> {
-  const url = String(input.url ?? "").trim();
-  if (!url) throw new BusError("url is required");
-  if (url.length > MAX_WEBHOOK_URL_CHARS) {
-    throw new BusError(`url is capped at ${MAX_WEBHOOK_URL_CHARS} chars`);
+  const rawUrl = input.url != null ? String(input.url).trim() : "";
+  const hasUrl = rawUrl !== "";
+  const hasVpc = input.vpc != null;
+  if (hasUrl && hasVpc) {
+    throw new BusError("provide exactly one target: url OR vpc, not both");
   }
-  if (!isHttpsUrl(url)) throw new BusError("url must be https");
+  if (!hasUrl && !hasVpc) {
+    throw new BusError("a target is required: url (https) or vpc { binding }");
+  }
+
+  let targetKind: "url" | "vpc";
+  let url: string;
+  let vpcBinding: string | null;
+  if (hasVpc) {
+    targetKind = "vpc";
+    url = "";
+    const binding = String(input.vpc?.binding ?? "").trim();
+    if (!binding) throw new BusError("vpc.binding is required");
+    if (binding.length > MAX_VPC_BINDING_CHARS) {
+      throw new BusError(`vpc.binding is capped at ${MAX_VPC_BINDING_CHARS} chars`);
+    }
+    // Allowlist: only a binding actually declared on the Worker is registerable, so
+    // a typo cannot silently register an unroutable doorbell (it would just poll).
+    if (!isVpcDoorbellBinding(binding)) {
+      throw new BusError(`unknown vpc binding: ${binding}`);
+    }
+    // A consumer registers only its OWN row; a vpc.consumer, if supplied, must be self.
+    const vpcConsumer = input.vpc?.consumer != null ? String(input.vpc.consumer).trim() : consumer;
+    if (vpcConsumer !== consumer) {
+      throw new BusError("vpc.consumer must match your own consumer");
+    }
+    vpcBinding = binding;
+  } else {
+    targetKind = "url";
+    if (rawUrl.length > MAX_WEBHOOK_URL_CHARS) {
+      throw new BusError(`url is capped at ${MAX_WEBHOOK_URL_CHARS} chars`);
+    }
+    if (!isHttpsUrl(rawUrl)) throw new BusError("url must be https");
+    url = rawUrl;
+    vpcBinding = null;
+  }
+
   const secret = String(input.secret ?? "");
   if (!secret) throw new BusError("secret is required");
   if (secret.length > MAX_WEBHOOK_SECRET_CHARS) {
@@ -805,16 +863,18 @@ export async function setWebhook(
 
   await db
     .prepare(
-      `INSERT INTO webhook_endpoints (consumer, url, secret, auth_env, enabled, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO webhook_endpoints (consumer, target_kind, url, vpc_binding, secret, auth_env, enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(consumer) DO UPDATE SET
+         target_kind = excluded.target_kind,
          url = excluded.url,
+         vpc_binding = excluded.vpc_binding,
          secret = excluded.secret,
          auth_env = excluded.auth_env,
          enabled = excluded.enabled,
          updated_at = excluded.updated_at`,
     )
-    .bind(consumer, url, secret, authEnv || null, enabled, now, now)
+    .bind(consumer, targetKind, url, vpcBinding, secret, authEnv || null, enabled, now, now)
     .run();
 
   const ep = await getWebhook(db, consumer);
@@ -914,6 +974,30 @@ async function deliverOne(
     }
   }
 
+  // #40 dual-path transport. A "url" endpoint POSTs to a public https origin
+  // (the v0.4.0 path, unchanged). A "vpc" endpoint rings through a Workers VPC
+  // binding to the box doorbell mux; the mux routes by the /ring/<consumer> path
+  // (X-Bus-Consumer header carries it too). Headers, HMAC, body, and retry are
+  // IDENTICAL across both paths -- only the transport differs.
+  let ring: (init: RequestInit) => Promise<Response>;
+  if (ep.target_kind === "vpc") {
+    const binding = ep.vpc_binding ?? "";
+    const svc = binding ? (env[binding] as Fetcher | undefined) : undefined;
+    if (!svc || typeof svc.fetch !== "function") {
+      // Registered but the binding is not provisioned on this deploy: log and
+      // degrade to poll (record attempts 0 so the thread report shows it tried).
+      console.log(
+        JSON.stringify({ event: "webhook_vpc_binding_missing", consumer, vpc_binding: binding }),
+      );
+      await recordDelivery(db, message.id, consumer, null, 0, 0);
+      return;
+    }
+    const ringUrl = `https://doorbell.local/ring/${encodeURIComponent(consumer)}`;
+    ring = (init) => svc.fetch(ringUrl, init);
+  } else {
+    ring = (init) => fetchImpl(ep.url, init);
+  }
+
   let attempts = 0;
   let lastStatus = 0;
   let deliveredAt: string | null = null;
@@ -921,7 +1005,7 @@ async function deliverOne(
     if (i > 0) await sleep(WEBHOOK_BACKOFF_MS[i - 1] ?? 5000);
     attempts = i + 1;
     try {
-      const res = await fetchImpl(ep.url, { method: "POST", headers, body: rawBody });
+      const res = await ring({ method: "POST", headers, body: rawBody });
       lastStatus = res.status;
       if (res.status >= 200 && res.status < 300) {
         deliveredAt = nowIso();

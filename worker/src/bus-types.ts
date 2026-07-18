@@ -64,6 +64,8 @@ export const MAX_REF_CHARS = 512;
 export const MAX_WEBHOOK_URL_CHARS = 2048;
 export const MAX_WEBHOOK_SECRET_CHARS = 512;
 export const MAX_AUTH_ENV_CHARS = 128;
+// #40: a Workers VPC binding NAME is a short identifier, never a URL.
+export const MAX_VPC_BINDING_CHARS = 128;
 
 export function utf8Bytes(value: string): number {
   return new TextEncoder().encode(value).length;
@@ -128,10 +130,19 @@ export interface ConsumerStatus {
   webhook: boolean;
 }
 
+/** Doorbell target kind (#40): a public https url, or a private Workers VPC binding. */
+export type WebhookTargetKind = "url" | "vpc";
+
 /** A registered webhook endpoint row (secret is internal; never returned raw). */
 export interface WebhookEndpoint {
   consumer: string;
+  // #40 dual-path target. "url" rings a public https origin (the v0.4.0 shape);
+  // "vpc" rings through a Workers VPC binding to a per-box doorbell mux.
+  target_kind: WebhookTargetKind;
+  /** Public https target. The real value for a "url" row; empty string for a "vpc" row. */
   url: string;
+  /** Workers VPC binding NAME to ring through. Set for a "vpc" row; null for a "url" row. */
+  vpc_binding: string | null;
   secret: string;
   auth_env: string | null;
   enabled: boolean;
@@ -142,7 +153,11 @@ export interface WebhookEndpoint {
 /** Caller-safe view of a webhook endpoint: the secret value is never exposed. */
 export interface WebhookEndpointView {
   consumer: string;
-  url: string;
+  // #40: additive. "url" endpoints keep a populated `url` (existing readers unaffected);
+  // "vpc" endpoints carry `vpc_binding` and a null `url`.
+  target_kind: WebhookTargetKind;
+  url: string | null;
+  vpc_binding: string | null;
   auth_env: string | null;
   enabled: boolean;
   secret_set: true;

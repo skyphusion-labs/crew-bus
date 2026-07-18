@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### #40 -- dual-path doorbell delivery (Workers VPC targets), Worker side
+
+Phase 1 of retiring the per-seat public `hooks-*` cloudflared tunnels for fleet seats (feasibility
+memo: QUALIFIED GO, one VPC service per BOX fronting a doorbell mux).
+
+- `webhook_endpoints` gains an additive target type: `target_kind` (`url` | `vpc`) + `vpc_binding`.
+  A `url` row is the v0.4.0 public-https shape, unchanged; a `vpc` row rings through a declared
+  Workers VPC binding to a per-box doorbell mux, so a fleet seat needs no public tunnel.
+- `bus_webhook_set` / `PUT /api/webhook` accept EXACTLY ONE target: `url` (https) or
+  `vpc: { binding, consumer? }`. The binding must be on the Worker allowlist (`VPC_DOORBELL_BINDINGS`),
+  so a typo cannot register an unroutable doorbell; `vpc.consumer`, if given, must be your own.
+- Delivery maps the binding NAME to a `[[vpc_services]]` binding and rings via
+  `env.<BINDING>.fetch("https://doorbell.local/ring/<consumer>", ...)`. The v0.4.0 contract is
+  preserved EXACTLY on both paths: body-less ring, `X-Bus-Signature` HMAC over `<ts>.<body>`,
+  `waitUntil` off the send critical path, 3-attempt retry, lost ring == poll. A registered-but-
+  unprovisioned binding logs `webhook_vpc_binding_missing` and degrades to poll.
+- Schema is additive: existing DBs apply `worker/migrations/0001_webhook_vpc_target.sql`
+  (ADD COLUMN, O(1)); every existing public-https doorbell keeps working untouched.
+- Not yet wired end-to-end: the dischord doorbell mux + VPC service (fleet-chezmoi, CR fc#808) and
+  the production row cutover follow once the mux is live and a failover drill passes.
+
 ## 0.5.0
 
 ### #41 -- claim/lease primitive for broadcast handoffs

@@ -121,8 +121,21 @@ export async function handleApi(
     // authenticated `consumer`). No cross-consumer read or write is possible.
     if (pathname === "/api/webhook" && request.method === "PUT") {
       const body = await readJson(request);
+      // #40: accept either a public https `url` or a private `vpc` target
+      // `{ binding, consumer? }`. setWebhook enforces exactly-one + validates.
+      const vpcIn =
+        body.vpc != null && typeof body.vpc === "object"
+          ? {
+              binding: String((body.vpc as Record<string, unknown>).binding ?? ""),
+              consumer:
+                (body.vpc as Record<string, unknown>).consumer != null
+                  ? String((body.vpc as Record<string, unknown>).consumer)
+                  : undefined,
+            }
+          : null;
       const webhook = await setWebhook(env.DB, consumer, {
-        url: String(body.url ?? ""),
+        url: body.url != null ? String(body.url) : undefined,
+        vpc: vpcIn,
         secret: String(body.secret ?? ""),
         auth_env: body.auth_env != null ? String(body.auth_env) : null,
         enabled: body.enabled === undefined ? undefined : Boolean(body.enabled),

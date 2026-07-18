@@ -45,14 +45,21 @@ CREATE TABLE IF NOT EXISTS consumers (
 -- Doorbell webhooks (#26, v0.4.0). ADDITIVE ONLY: new tables, no ALTER of the
 -- tables above. A registered endpoint is rung (never mailed) on a successful
 -- send so the receiver polls sooner; a lost/failed doorbell degrades to polling.
+-- #40 dual-path targets: target_kind 'url' keeps the v0.4.0 public-https shape;
+-- target_kind 'vpc' rings through a Workers VPC binding (vpc_binding) to a per-box
+-- doorbell mux, so fleet seats need no public hooks-* tunnel. For a vpc row `url` is
+-- the empty string (the NOT NULL is honoured; delivery gates strictly on target_kind).
+-- Existing DBs get these two columns via migrations/0001_webhook_vpc_target.sql.
 CREATE TABLE IF NOT EXISTS webhook_endpoints (
-  consumer   TEXT PRIMARY KEY,   -- FK-by-convention to roster consumer name
-  url        TEXT NOT NULL,      -- https only, enforced at registration
-  secret     TEXT NOT NULL,      -- HMAC key for signing (protects the receiver)
-  auth_env   TEXT,               -- optional: NAME of a Worker secret sent as Authorization (D1 holds only the name)
-  enabled    INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  consumer    TEXT PRIMARY KEY,   -- FK-by-convention to roster consumer name
+  target_kind TEXT NOT NULL DEFAULT 'url',  -- 'url' | 'vpc' (#40)
+  url         TEXT NOT NULL,      -- https for a url row; '' for a vpc row
+  vpc_binding TEXT,               -- Workers VPC binding NAME for a vpc row; null otherwise (#40)
+  secret      TEXT NOT NULL,      -- HMAC key for signing (protects the receiver)
+  auth_env    TEXT,               -- optional: NAME of a Worker secret sent as Authorization (D1 holds only the name)
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS webhook_deliveries (

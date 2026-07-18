@@ -25,6 +25,14 @@ binding = "DB"
 database_name = "crew-bus"
 database_id = "REPLACE_WITH_D1_ID"
 
+# #40 doorbell VPC muxes (optional): a Workers VPC service per box fronting a tiny
+# doorbell mux, so fleet seats need no public hooks-* tunnel. The binding NAME must
+# match VPC_DOORBELL_BINDINGS in src/env.ts and the webhook row target. Add one
+# stanza per box mux once its VPC service exists (service_id from the VPC service).
+# [[vpc_services]]
+# binding = "DISCHORD_DOORBELL_VPC"
+# service_id = "REPLACE_WITH_VPC_SERVICE_ID"
+
 [triggers]
 crons = ["0 4 * * *"]
 
