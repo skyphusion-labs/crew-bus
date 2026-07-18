@@ -2,6 +2,18 @@
 
 ## 0.6.1
 
+### Release mechanics
+
+- `deploy.yml` now applies **D1 migrations from CI** before deploying. The #43 migration was
+  documented as a manual step and the workflow had no migrations stage, so v0.6.0 shipped code
+  whose webhook reads referenced columns that did not exist yet: every doorbell read threw and
+  delivery silently degraded to poll until the ALTERs were applied by hand. A migration that
+  only a human remembers is a migration that eventually does not run.
+- The stdio MCP client `@skyphusion/crew-bus` is released at **0.6.1**, matching the deployed
+  Worker, and carries the #43 `vpc` target in its `bus_webhook_set` tool schema. Published on a
+  `crew-bus-v0.6.1` tag; the client is deliberately released AFTER the server capability it
+  references was proven live end to end (fc#808 ring proof).
+
 ### #45 -- doorbell ring uses http, and a failed attempt now says why
 
 Backend-only fix. The v0.6.0 dual-path doorbell could not ring a VPC target at all; the end-to-end
