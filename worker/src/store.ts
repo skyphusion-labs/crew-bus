@@ -4,6 +4,7 @@ import {
   type BusMessage,
   type Channel,
   type ChannelSummary,
+  type Claim,
   type ConsumerStatus,
   type MessageRefs,
   type MessageType,
@@ -69,7 +70,7 @@ function rowToMessage(row: MessageRow): BusMessage {
 export const PENDING_ACK_CAP = 20;
 
 /** A redelivered, still-unacked message. pending_ack distinguishes it from new traffic. */
-export type PendingAckMessage = BusMessage & { pending_ack: true };
+export type PendingAckMessage = BusMessage & { pending_ack: true; claim?: Claim | null };
 
 function parseTo(value: unknown): string[] {
   if (!Array.isArray(value) || value.length === 0) {
@@ -244,9 +245,17 @@ export async function getThread(
 
   // Senders see their own messages: a thread must reconstruct for the agent
   // that started it, not just for the recipients.
-  const visible = (results ?? [])
+  const raw = (results ?? [])
     .map(rowToMessage)
     .filter((m) => isVisibleTo(m.to, consumer) || m.from === consumer);
+
+  // #41: handoff rows carry their claim state for every thread reader, so a
+  // late arriver sees who owns the work without a delivery report.
+  const visible: ThreadMessage[] = [];
+  for (const m of raw) {
+    const claim = m.type === "handoff" ? await getClaim(db, m.id) : undefined;
+    visible.push(claim === undefined ? m : { ...m, claim });
+  }
 
   const own = visible.filter((m) => m.from === consumer && m.type !== "ack");
   if (own.length === 0) return visible;
@@ -454,11 +463,18 @@ async function pendingAcksFor(
   }
   query += ` ORDER BY created_at ASC, id ASC`;
   const { results } = await db.prepare(query).bind(...binds).all<MessageRow>();
-  return (results ?? [])
+  const pending = (results ?? [])
     .map(rowToMessage)
     .filter((m) => isVisibleTo(m.to, consumer))
     .slice(0, PENDING_ACK_CAP)
-    .map((m) => ({ ...m, pending_ack: true as const }));
+    .map((m) => ({ ...m, pending_ack: true as const }) as PendingAckMessage);
+  // #41: annotate pending handoffs with their claim state, so a poller seeing a
+  // broadcast handoff already claimed by someone else knows to bus_claim (which
+  // records the losing receipt-ack) rather than start the work.
+  for (const m of pending) {
+    if (m.type === "handoff") m.claim = await getClaim(db, m.id);
+  }
+  return pending;
 }
 
 async function ackedMessageIds(db: D1Database, consumer: string): Promise<Set<string>> {
@@ -565,6 +581,78 @@ export async function ackMessage(
     ack_of: messageId,
     refs: original.refs,
   });
+}
+
+// ---------------------------------------------------------------------------
+// #41 claim arbitration (triple-claim incident 2026-07-17)
+// ---------------------------------------------------------------------------
+
+/** The winning claim on a message, or null if unclaimed. */
+export async function getClaim(db: D1Database, messageId: string): Promise<Claim | null> {
+  const row = await db
+    .prepare(`SELECT message_id, claimed_by, created_at FROM claims WHERE message_id = ?`)
+    .bind(messageId)
+    .first<Claim>();
+  return row ?? null;
+}
+
+export interface ClaimOutcome {
+  /** True when the caller owns the work order; false = stand down. */
+  claimed: boolean;
+  claim: Claim;
+  message: BusMessage;
+  /** The receipt ack recorded for the caller (win or lose), clearing pending_acks. */
+  ack: BusMessage;
+}
+
+// First claim wins, arbitrated by the claims PK: INSERT ... ON CONFLICT DO
+// NOTHING then read back the row, so two racing claimers converge on one
+// winner no matter how late a doorbell fired. Both outcomes record the
+// caller's ack (delivery receipt): the winner's as the claim, the loser's as
+// a stand-down receipt, so a lost claim also clears the pending_ack
+// obligation. Idempotent: re-claiming returns the same outcome (ackMessage is
+// already idempotent per #22).
+export async function claimMessage(
+  db: D1Database,
+  from: string,
+  messageId: string,
+  body?: string,
+): Promise<ClaimOutcome> {
+  const row = await db
+    .prepare(`SELECT * FROM messages WHERE id = ?`)
+    .bind(messageId)
+    .first<MessageRow>();
+  if (!row) throw new BusError(`message not found: ${messageId}`);
+  const message = rowToMessage(row);
+  if (message.from === from) throw new BusError("cannot claim your own message");
+  if (!isVisibleTo(message.to, from)) {
+    throw new BusError("not authorized to claim this message");
+  }
+  if (message.type !== "handoff") {
+    throw new BusError(`claim applies to type=handoff messages (got type=${message.type})`);
+  }
+
+  await db
+    .prepare(
+      `INSERT INTO claims (message_id, claimed_by, created_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(message_id) DO NOTHING`,
+    )
+    .bind(messageId, from, nowIso())
+    .run();
+
+  const claim = await getClaim(db, messageId);
+  if (!claim) throw new BusError("failed to persist claim");
+  const claimed = claim.claimed_by === from;
+
+  // A loser's caller-supplied body was written as a claim ("starting now") and
+  // would mislead the thread; the stand-down receipt always states the winner.
+  const ackBody = claimed
+    ? body?.trim() || `claim ${messageId}`
+    : `ack ${messageId} (claim lost to ${claim.claimed_by})`;
+  const ack = await ackMessage(db, from, messageId, ackBody);
+
+  return { claimed, claim, message, ack };
 }
 
 export async function markChannelSeen(

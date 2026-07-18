@@ -63,3 +63,14 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
   last_status  INTEGER,          -- last HTTP status (or 0 for network error)
   PRIMARY KEY (message_id, consumer)
 );
+
+-- Claim arbitration for broadcast handoffs (#41, v0.5.0). ADDITIVE ONLY.
+-- The PRIMARY KEY on message_id IS the arbitration: the first INSERT lands,
+-- every later claim hits ON CONFLICT DO NOTHING and reads back the winner.
+-- Rows are immutable; a claim is never transferred or released (re-broadcast a
+-- new handoff instead).
+CREATE TABLE IF NOT EXISTS claims (
+  message_id TEXT PRIMARY KEY,
+  claimed_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);

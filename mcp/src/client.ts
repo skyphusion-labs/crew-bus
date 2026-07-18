@@ -166,6 +166,12 @@ export class CrewBusClient {
     return p;
   }
 
+  // #41: claims are server-arbitrated (first wins), so no in-flight dedup is
+  // needed -- a repeat claim is idempotent on the Worker side.
+  claim(messageId: string, body?: string) {
+    return this.request("POST", "/api/claim", { message_id: messageId, body });
+  }
+
   channels() {
     return this.request("GET", "/api/channels");
   }

@@ -44,6 +44,23 @@ client input), so a `from: <lead>` message really is that consumer.
   **delivery receipt**, not a cue for the recipient to idle
 - **`refs`** — include `repo`, `issue`, `branch`/`pr` when they exist; `issue`/`pr` are canonical **bare numbers** (`42`, not `#42`; a leading `#` is stripped on write)
 
+## Claiming broadcast handoffs (mandatory)
+
+A broadcast handoff (`to: ["*"]`) is a **race**: exactly one consumer should execute it.
+
+1. **`bus_claim` the message BEFORE starting the work.** The server arbitrates: the first claim
+   wins atomically; a late claim returns `claimed: false` with the winner's identity, no matter
+   how late your doorbell fired.
+2. `claimed: true` — you own the work order; continue executing **the same turn**.
+3. `claimed: false` — **stand down**; do not start, do not open a duplicate PR. Your receipt ack
+   is recorded automatically (it names the winner), so your `pending_ack` obligation clears.
+4. A plain `bus_ack` does **not** reserve broadcast work. Direct (single-recipient) handoffs may
+   still use plain `bus_ack`; claiming them is harmless.
+5. Claims are immutable — never released or transferred. If the winner stalls, the **sender**
+   posts a new handoff (optionally direct-addressed); nobody inherits by re-claiming.
+6. `bus_thread` and `pending_acks` annotate handoffs with their `claim` state; an already-claimed
+   pending handoff means claim-for-the-receipt, then move on.
+
 ## Delivery visibility & discovery
 
 A delivery fault must degrade to a **sender-visible** signal, never to a human relay. The tools that

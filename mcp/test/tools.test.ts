@@ -6,6 +6,7 @@ describe("TOOLS", () => {
     expect(TOOLS.map((t) => t.name).sort()).toEqual([
       "bus_ack",
       "bus_channels",
+      "bus_claim",
       "bus_consumers",
       "bus_mark_seen",
       "bus_poll",

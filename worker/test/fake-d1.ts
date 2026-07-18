@@ -39,6 +39,12 @@ export interface WebhookDeliveryRow {
   last_status: number | null;
 }
 
+export interface ClaimRow {
+  message_id: string;
+  claimed_by: string;
+  created_at: string;
+}
+
 export interface FakeD1State {
   messages: MessageRow[];
   cursors: CursorRow[];
@@ -46,6 +52,7 @@ export interface FakeD1State {
   consumers: { name: string; last_poll_at: string }[];
   webhook_endpoints?: WebhookEndpointRow[];
   webhook_deliveries?: WebhookDeliveryRow[];
+  claims?: ClaimRow[];
 }
 
 export function makeFakeD1(
@@ -55,6 +62,7 @@ export function makeFakeD1(
   // (every pre-#26 test) still work.
   const endpoints: WebhookEndpointRow[] = (state.webhook_endpoints ??= []);
   const deliveries: WebhookDeliveryRow[] = (state.webhook_deliveries ??= []);
+  const claims: ClaimRow[] = (state.claims ??= []);
 
   function makeStmt(sql: string) {
     let bound: unknown[] = [];
@@ -185,6 +193,15 @@ export function makeFakeD1(
           else deliveries[idx] = row;
           return { meta: { changes: 1 } };
         }
+        // #41: claims PK arbitration -- first insert wins, conflicts are no-ops.
+        if (/INSERT INTO claims/i.test(sql)) {
+          const [message_id, claimed_by, created_at] = bound as [string, string, string];
+          if (claims.some((c) => c.message_id === message_id)) {
+            return { meta: { changes: 0 } };
+          }
+          claims.push({ message_id, claimed_by, created_at });
+          return { meta: { changes: 1 } };
+        }
         if (/DELETE FROM webhook_endpoints/i.test(sql)) {
           const [consumer] = bound as [string];
           const before = endpoints.length;
@@ -214,6 +231,12 @@ export function makeFakeD1(
         if (/SELECT \* FROM messages WHERE id = \?/i.test(sql)) {
           const id = bound[0] as string;
           return (state.messages.find((m) => m.id === id) ?? null) as T | null;
+        }
+        // #41: winning claim lookup.
+        if (/SELECT message_id, claimed_by, created_at FROM claims WHERE message_id = \?/i.test(sql)) {
+          const messageId = bound[0] as string;
+          const row = claims.find((c) => c.message_id === messageId);
+          return (row ? { ...row } : null) as T | null;
         }
         if (/SELECT last_seen_at FROM cursors/i.test(sql)) {
           const [consumer, channel] = bound as [string, string];

@@ -105,9 +105,18 @@ export interface RecipientDelivery {
   webhook_attempts: number;
 }
 
+/** Server-arbitrated claim on a handoff (#41). First claim wins; rows are immutable. */
+export interface Claim {
+  message_id: string;
+  claimed_by: string;
+  created_at: string;
+}
+
 /** A thread message; `delivery` is present only for messages the caller sent. */
 export interface ThreadMessage extends BusMessage {
   delivery?: RecipientDelivery[];
+  /** #41: present on type=handoff rows -- the winning claim, or null if unclaimed. */
+  claim?: Claim | null;
 }
 
 /** Registered consumer + last poll time (null if never polled). bus_consumers. */
