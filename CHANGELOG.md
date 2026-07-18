@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.1
+
+### #45 -- doorbell ring uses http, and a failed attempt now says why
+
+Backend-only fix. The v0.6.0 dual-path doorbell could not ring a VPC target at all; the end-to-end
+ring proof found why.
+
+- **The ring URL scheme was wrong.** Delivery built `https://doorbell.local/ring/<consumer>`, but
+  the Workers VPC service for the doorbell defines `http_port 9870` with `https_port` NULL: the mux
+  listens plaintext on loopback behind the tunnel, so there is no TLS on it to handshake with. The
+  edge resolves the URL SCHEME to the service port config **before** any transport, so the request
+  failed at the edge with `port_not_open ... failed to build target strategy: https` and never
+  reached the tunnel. Now `http://`. (This corrects the URL shown in the 0.6.0 entry above, which
+  documented the scheme as shipped.) If the service ever gains an `https_port`, both change together.
+- **The per-attempt `catch {}` swallowed the exception.** A hard, permanent, edge-level
+  misconfiguration recorded identically to a transient network blip -- `attempts=3`,
+  `last_status=0`, nothing else -- so the delivery record could not distinguish "unreachable
+  forever" from "try again later". Failed attempts now log a structured
+  `webhook_attempt_error` line with the consumer, attempt number, and exception **message**. Message
+  only: never headers (HMAC signature, and the `Authorization` value for an `auth_env` endpoint) and
+  never the body.
+- No schema change, no API change, no behavior change on the `url` (public https) path.
+
 ## 0.6.0
 
 ### #40 -- dual-path doorbell delivery (Workers VPC targets), Worker side

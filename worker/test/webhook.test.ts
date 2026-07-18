@@ -289,6 +289,56 @@ describe("webhook firing (#26)", () => {
     expect(state.webhook_deliveries![0]!.delivered_at).toBeNull();
   });
 
+  it("logs webhook_attempt_error with the exception message, and never the signature or body (#45)", async () => {
+    const state = freshState();
+    const db = makeFakeD1(state);
+    const roster = ["mackaye", "albini"];
+    await setWebhook(db, "albini", { url: "https://recv.example/hook", secret: "hmac-key-fake" });
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("port_not_open: failed to build target strategy: https");
+    }) as unknown as typeof fetch;
+    const logged: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((line: unknown) => {
+      logged.push(String(line));
+    });
+
+    const msg = await sendMessage(
+      db,
+      "mackaye",
+      { channel: "general", to: ["albini"], type: "status", body: "secret-message-body" },
+      roster,
+    );
+    await fireWebhooks({ DB: db } as unknown as Env, msg, roster, { fetchImpl, sleep: noSleep });
+    spy.mockRestore();
+
+    const errors = logged
+      .map((l) => {
+        try {
+          return JSON.parse(l);
+        } catch {
+          return null;
+        }
+      })
+      .filter((e) => e && e.event === "webhook_attempt_error");
+
+    // One line per failed attempt, each naming the consumer, the attempt, and WHY.
+    expect(errors).toHaveLength(3);
+    expect(errors.map((e) => e.attempt)).toEqual([1, 2, 3]);
+    expect(errors[0].consumer).toBe("albini");
+    expect(errors[0].message).toContain("port_not_open");
+
+    // CONTROL: the diagnosis this exists to enable. Before #45 the catch was empty, so this
+    // string was unrecoverable and a permanent edge misconfiguration looked like a blip.
+    expect(JSON.stringify(errors)).toContain("failed to build target strategy");
+
+    // SECRET HYGIENE: message only. Never the HMAC signature, the secret, or the body.
+    const all = JSON.stringify(errors);
+    expect(all).not.toContain("hmac-key-fake");
+    expect(all).not.toContain("sha256=");
+    expect(all).not.toContain("secret-message-body");
+    expect(all).not.toContain("X-Bus-Signature");
+  });
+
   it("bus_thread delivery report joins webhook_delivered_at + webhook_attempts (#26)", async () => {
     const db = makeFakeD1(freshState());
     const roster = ["mackaye", "albini"];
@@ -450,7 +500,13 @@ describe("webhook vpc firing (#40)", () => {
     // Rung via the binding, never the url fetch.
     expect(urlFetch).not.toHaveBeenCalled();
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.url).toBe(`https://doorbell.local/ring/mackaye`);
+    // http, NOT https, and this assertion is load-bearing. The VPC service is http-only
+    // (http_port 9870, https_port NULL), and the edge resolves scheme -> port BEFORE any
+    // transport, so an https:// ring dies at the edge with `port_not_open` and never reaches
+    // the tunnel. This test previously asserted `https://`, which locked the defect in: the
+    // suite was green while the vpc path could not ring at all (#45).
+    expect(calls[0]!.url).toBe(`http://doorbell.local/ring/mackaye`);
+    expect(calls[0]!.url.startsWith("https:")).toBe(false);
 
     const headers = calls[0]!.init.headers as Record<string, string>;
     const rawBody = String(calls[0]!.init.body);

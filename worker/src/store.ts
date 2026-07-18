@@ -992,7 +992,16 @@ async function deliverOne(
       await recordDelivery(db, message.id, consumer, null, 0, 0);
       return;
     }
-    const ringUrl = `https://doorbell.local/ring/${encodeURIComponent(consumer)}`;
+    // http, NOT https -- deliberate, and it is the transport contract, not a downgrade.
+    // The Workers VPC service for the doorbell defines http_port 9870 with https_port NULL:
+    // the mux listens plaintext on loopback behind the tunnel, so there is no TLS on it to
+    // handshake with. The edge maps the URL SCHEME to the service port config BEFORE any
+    // transport happens, so an https:// URL against an http-only service fails at the edge
+    // with `port_not_open ... failed to build target strategy: https` -- it never reaches the
+    // tunnel, and no amount of tunnel/routing debugging can see it. Proven end to end by the
+    // #45 ring proof: the identical request over http:// rang edge -> tunnel -> mux -> seat.
+    // If the service ever gains an https_port, change BOTH together, never just this line.
+    const ringUrl = `http://doorbell.local/ring/${encodeURIComponent(consumer)}`;
     ring = (init) => svc.fetch(ringUrl, init);
   } else {
     ring = (init) => fetchImpl(ep.url, init);
@@ -1011,9 +1020,26 @@ async function deliverOne(
         deliveredAt = nowIso();
         break;
       }
-    } catch {
+    } catch (err) {
       // Network error: status 0, keep retrying within the attempt budget.
       lastStatus = 0;
+      // LOG THE MESSAGE. This catch used to swallow the exception entirely, so a hard,
+      // permanent, edge-level misconfiguration (the https-vs-http scheme bug above) recorded
+      // identically to a transient network blip: attempts=3, last_status=0, and nothing else.
+      // That is a check reporting fine while the thing it checks is broken -- the failure was
+      // fully diagnosed only by binding a throwaway probe Worker to the same service to
+      // extract the string this line now prints. An hour of work to recover one message.
+      // MESSAGE ONLY: never the headers or body. `headers` carries the HMAC signature and,
+      // for an auth_env endpoint, the Authorization value; the body is the doorbell payload.
+      // A fetch exception message carries neither, so this is safe to emit -- keep it that way.
+      console.log(
+        JSON.stringify({
+          event: "webhook_attempt_error",
+          consumer,
+          attempt: attempts,
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      );
     }
   }
   await recordDelivery(db, message.id, consumer, deliveredAt, attempts, lastStatus);
