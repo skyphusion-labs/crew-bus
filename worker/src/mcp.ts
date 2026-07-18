@@ -187,15 +187,26 @@ const TOOLS = [
     name: "bus_webhook_set",
     description:
       "Register or replace YOUR OWN doorbell webhook endpoint. On a successful send addressed to you, " +
-      "the bus POSTs a body-less doorbell ({message_id, channel, thread_id, sent_at}) signed with your " +
-      "secret (X-Bus-Signature: sha256=hmac); react by polling the bus. url must be https. secret is " +
-      "the HMAC key (store it as a fixture, never a real credential). auth_env optionally names a " +
-      "Worker secret whose value is sent as the Authorization header (the name only is stored). A lost " +
-      "doorbell degrades to polling; it is never a correctness dependency.",
+      "the bus rings a body-less doorbell ({message_id, channel, thread_id, sent_at}) signed with your " +
+      "secret (X-Bus-Signature: sha256=hmac); react by polling the bus. Provide EXACTLY ONE target: " +
+      "`url` (a public https endpoint) OR `vpc` ({ binding } naming a Workers VPC doorbell mux for a " +
+      "fleet seat, so no public hooks-* tunnel is needed). secret is the HMAC key (store it as a fixture, " +
+      "never a real credential). auth_env optionally names a Worker secret whose value is sent as the " +
+      "Authorization header (the name only is stored). A lost doorbell degrades to polling; it is never a " +
+      "correctness dependency.",
     inputSchema: {
       type: "object",
       properties: {
-        url: { type: "string", description: "https endpoint to POST doorbells to" },
+        url: { type: "string", description: "Public https endpoint to POST doorbells to (omit if using vpc)" },
+        vpc: {
+          type: "object",
+          description: "Private Workers VPC target (omit if using url): rings a per-box doorbell mux",
+          properties: {
+            binding: { type: "string", description: "Declared VPC binding name (e.g. DISCHORD_DOORBELL_VPC)" },
+            consumer: { type: "string", description: "Optional; must equal your own consumer if given" },
+          },
+          required: ["binding"],
+        },
         secret: { type: "string", description: "HMAC signing key (protects your receiver from spoofed doorbells)" },
         auth_env: {
           type: "string",
@@ -203,7 +214,7 @@ const TOOLS = [
         },
         enabled: { type: "boolean", description: "Default true; set false to keep the row but stop firing" },
       },
-      required: ["url", "secret"],
+      required: ["secret"],
     },
   },
   {
@@ -331,8 +342,20 @@ async function callTool(
       return toolText({ ok: true, consumers });
     }
     case "bus_webhook_set": {
+      // #40: accept a public https `url` OR a private `vpc` { binding, consumer? }.
+      const vpcArg =
+        args.vpc != null && typeof args.vpc === "object"
+          ? {
+              binding: String((args.vpc as Record<string, unknown>).binding ?? ""),
+              consumer:
+                (args.vpc as Record<string, unknown>).consumer != null
+                  ? String((args.vpc as Record<string, unknown>).consumer)
+                  : undefined,
+            }
+          : null;
       const webhook = await setWebhook(env.DB, consumer, {
-        url: String(args.url ?? ""),
+        url: args.url != null ? String(args.url) : undefined,
+        vpc: vpcArg,
         secret: String(args.secret ?? ""),
         auth_env: args.auth_env != null ? String(args.auth_env) : null,
         enabled: args.enabled === undefined ? undefined : Boolean(args.enabled),

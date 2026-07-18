@@ -23,7 +23,9 @@ export interface CursorRow {
 
 export interface WebhookEndpointRow {
   consumer: string;
+  target_kind: string;
   url: string;
+  vpc_binding: string | null;
   secret: string;
   auth_env: string | null;
   enabled: number;
@@ -152,22 +154,37 @@ export function makeFakeD1(
         }
         // #26: webhook_endpoints upsert (created_at preserved on conflict).
         if (/INSERT INTO webhook_endpoints/i.test(sql)) {
-          const [consumer, url, secret, auth_env, enabled, created_at, updated_at] = bound as [
-            string,
-            string,
-            string,
-            string | null,
-            number,
-            string,
-            string,
-          ];
+          const [consumer, target_kind, url, vpc_binding, secret, auth_env, enabled, created_at, updated_at] =
+            bound as [
+              string,
+              string,
+              string,
+              string | null,
+              string,
+              string | null,
+              number,
+              string,
+              string,
+            ];
           const idx = endpoints.findIndex((e) => e.consumer === consumer);
           if (idx === -1) {
-            endpoints.push({ consumer, url, secret, auth_env, enabled, created_at, updated_at });
+            endpoints.push({
+              consumer,
+              target_kind,
+              url,
+              vpc_binding,
+              secret,
+              auth_env,
+              enabled,
+              created_at,
+              updated_at,
+            });
           } else {
             endpoints[idx] = {
               ...endpoints[idx]!,
+              target_kind,
               url,
+              vpc_binding,
               secret,
               auth_env,
               enabled,
@@ -244,7 +261,7 @@ export function makeFakeD1(
           return (row ? { last_seen_at: row.last_seen_at } : null) as T | null;
         }
         // #26: fetch one webhook endpoint row by consumer.
-        if (/SELECT consumer, url, secret, auth_env, enabled, created_at, updated_at FROM webhook_endpoints WHERE consumer = \?/i.test(sql)) {
+        if (/SELECT consumer, target_kind, url, vpc_binding, secret, auth_env, enabled, created_at, updated_at FROM webhook_endpoints WHERE consumer = \?/i.test(sql)) {
           const consumer = bound[0] as string;
           const row = endpoints.find((e) => e.consumer === consumer);
           return (row ? { ...row } : null) as T | null;

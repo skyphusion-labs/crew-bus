@@ -60,7 +60,11 @@ const markSeenSchema = {
 };
 
 const webhookSetSchema = {
-  url: z.string().min(1),
+  // #40 dual-path: provide EXACTLY ONE of url (public https) or vpc (private binding).
+  url: z.string().min(1).optional(),
+  vpc: z
+    .object({ binding: z.string().min(1), consumer: z.string().optional() })
+    .optional(),
   secret: z.string().min(1),
   auth_env: z.string().optional(),
   enabled: z.boolean().optional(),
@@ -163,10 +167,11 @@ export const TOOLS: ToolDef[] = [
     name: "bus_webhook_set",
     description:
       "Register or replace YOUR OWN doorbell webhook. On a successful send addressed to you, the bus " +
-      "POSTs a body-less doorbell ({message_id, channel, thread_id, sent_at}) signed with your secret " +
-      "(X-Bus-Signature: sha256=hmac); react by polling. url must be https. secret is the HMAC key. " +
-      "auth_env optionally names a Worker secret sent as the Authorization header (name only is stored). " +
-      "A lost doorbell degrades to polling; never a correctness dependency.",
+      "rings a body-less doorbell ({message_id, channel, thread_id, sent_at}) signed with your secret " +
+      "(X-Bus-Signature: sha256=hmac); react by polling. Provide EXACTLY ONE target: url (public https) " +
+      "OR vpc ({ binding } naming a Workers VPC doorbell mux for a fleet seat, no public tunnel needed). " +
+      "secret is the HMAC key. auth_env optionally names a Worker secret sent as the Authorization header " +
+      "(name only is stored). A lost doorbell degrades to polling; never a correctness dependency.",
     inputSchema: webhookSetSchema,
     handler: (client, a) => client.webhookSet(a),
   },
