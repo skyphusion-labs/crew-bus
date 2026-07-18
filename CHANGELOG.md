@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
 ### #40 -- dual-path doorbell delivery (Workers VPC targets), Worker side
 
