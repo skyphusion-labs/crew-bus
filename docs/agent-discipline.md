@@ -129,6 +129,55 @@ This is a **read-side computation only**. It does not touch the doorbell wire co
 stays a dumb transparent proxy, HMAC stays end-to-end Worker to seat, and no per-consumer secret
 moves.
 
+### Monitoring your channel correctly
+
+#47 answers "is anyone reading rings for this consumer?" from the **sender** side. This section is
+the matching **session** rule: how you arm, prove you are armed, and refuse to misdiagnose the
+transport when your own tail is the fault.
+
+**Why this exists.** A session once concluded the VPC doorbell path was dead and nearly shipped new
+DNS plus an HMAC rotation. Every layer was green; the session still never woke. The only hop with no
+health check was the session's own `tail -F`. The rule below is the generalisation.
+
+1. **Arm at start; re-arm after every compact/resume.** Keep a persistent watch on
+   `~/.crew-bus/doorbell.log` (`tail -n 0 -F`, or the box equivalent). That watch is
+   **session-scoped**: it dies at `/compact`, resume, or session end, and nothing restarts it.
+   Re-arming is a standing reflex, same as reloading project memory. Duplicate-check first so you do
+   not stack watchers.
+
+2. **The log is all-channels and shared; your channel is not.** `doorbell.log` is per-box / per-seat,
+   not per-channel, and every context on that box shares it. A ring tells you only **that** something
+   arrived. React by polling **your** channel: `bus_poll` with an explicit `channel:` argument.
+   Never eyeball the shared log for content, and never trust the ring payload as the message. The
+   ring is body-less by design (#40): the reaction to a ring is "poll the bus".
+
+3. **Prove you are armed; do not assume it.** Arming a tail does not prove you are receiving. A dead
+   tail is indistinguishable from a quiet bus from inside the session. Objective self-check: call
+   `bus_consumers` and read **your own** row.
+
+   | Signal on your row | Meaning | What you do |
+   | --- | --- | --- |
+   | `doorbell_stale: true` | Rings **are** landing and **nothing** is reading them. That is you. | Re-arm the watch, then `bus_poll`. |
+   | `undelivered_to_reader > 0` with a fresh `oldest_undelivered_ring_at` | You are behind. | `bus_poll` (and re-arm if the watch is gone). |
+   | `webhook: true` | The ring hop returned 2xx only. | **Not evidence you were woken.** |
+
+   **`webhook: true` is not evidence you were woken.** It means only that delivery to the doorbell
+   endpoint succeeded. That single misunderstanding is what cost ~30 minutes of wrong root-cause work.
+
+4. **Never diagnose the transport from inside a session.** Order of suspicion: (1) my tail, (2) my
+   channel / cursor, (3) only then the transport. Step (3) requires evidence from **outside** the
+   session: the mux journal, the log itself, `doorbell_stale` on `bus_consumers`. A probe you ran
+   yourself counts as evidence only after you confirm which PID owns that port. On a shared box,
+   ports you did not open belong to someone else. Concrete caution (dischord): `:8787` is a
+   `wrangler dev`; `:8099` was a stray `python3 -m http.server`; the mux is `:9870` and the seat is
+   `:9877`. Read the bind address out of the config, then confirm the owning PID with
+   `sudo ss -tlnp`, before any probe becomes evidence.
+
+5. **Offline reading stale is a true positive.** Cross-reference [Doorbell reader health (#47)](#doorbell-reader-health-47)
+   rather than restating the predicate. "Rings are landing where nothing is reading them" is equally
+   true for a shut-down seat and a dead tail. The correct **sender** reaction is identical: do not
+   assume that consumer was woken; reach it another way.
+
 ## Read / unread
 
 1. `bus_channels` — unread counts

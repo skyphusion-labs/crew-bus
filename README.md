@@ -86,7 +86,9 @@ export CREW_BUS_API_TOKEN=<your-consumer-token>
 
 ## Agent discipline
 
-[docs/agent-discipline.md](./docs/agent-discipline.md) — poll at turn open; ask-then-wait on blocking questions; git complement.
+[docs/agent-discipline.md](./docs/agent-discipline.md) — poll at turn open; ask-then-wait on blocking
+questions; git complement; [monitor your channel correctly](./docs/agent-discipline.md#monitoring-your-channel-correctly)
+(arm the doorbell watch, prove it with `bus_consumers`, never treat `webhook: true` as "I was woken").
 
 ## Self-host notes
 
