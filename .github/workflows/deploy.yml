@@ -4,7 +4,10 @@ name: deploy
 # main -- no laptop-local wrangler deploys (IaC doctrine; the hardcoded-0.1.0
 # /health drift was only findable because deploys were hand-run).
 #
-# Trigger: push a SemVer tag (v0.1.2) on a main commit, or workflow_dispatch.
+# Trigger: push a SemVer tag (v0.1.2) on a main commit. workflow_dispatch may
+# run typecheck/tests, but migrate/deploy/verify steps are guarded with
+# `if: startsWith(github.ref, 'refs/tags/v')` so a branch dispatch never ships
+# (common-thread pattern). Gap 1: tag must be an ancestor of origin/main.
 # Secrets:
 #   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID — scoped crew-bus-ci token
 #   SKYPHUSION_WRANGLER_TOML — production wrangler.toml blob (never committed)
@@ -34,6 +37,17 @@ jobs:
         working-directory: worker
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Assert tag is on main (no prod deploy from an unmerged branch)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::tag $GITHUB_REF_NAME points at $GITHUB_SHA which is not on origin/main; refusing to deploy an unreviewed commit"
+            exit 1
+          fi
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
@@ -45,6 +59,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - name: Materialize production wrangler.toml
+        if: startsWith(github.ref, 'refs/tags/v')
         working-directory: .
         env:
           SKYPHUSION_WRANGLER_TOML: ${{ secrets.SKYPHUSION_WRANGLER_TOML }}
@@ -62,17 +77,20 @@ jobs:
       # schema is never behind the code (additive-only migrations make that ordering safe;
       # a destructive migration would need a different, two-release dance).
       - name: Apply D1 migrations
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler d1 migrations apply crew-bus --remote
 
       - name: Deploy Worker
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy
       - name: Verify served version matches the release
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           CREW_BUS_HEALTH_URL: ${{ secrets.CREW_BUS_HEALTH_URL }}
         run: |
