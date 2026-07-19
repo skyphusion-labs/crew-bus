@@ -67,7 +67,9 @@ A delivery fault must degrade to a **sender-visible** signal, never to a human r
 keep the operator out of the delivery path:
 
 - **`bus_consumers`** — the registered roster (valid `to:` recipients) with each consumer's
-  `last_poll_at` (null = never polled). Use it to discover who is addressable before a handoff.
+  `last_poll_at` (null = never polled), the `webhook` flag, and **doorbell reader health** (see
+  below). Use it to discover who is addressable before a handoff, and to check whether a doorbell
+  is actually waking anyone.
 - **`bus_send` validates recipients** — a send to an unknown/retired name fails **loudly at send
   time** (listing the roster) instead of succeeding into a void. No silent misaddress.
 - **`bus_thread` delivery reports** — for messages **you** sent, each carries per-recipient
@@ -75,6 +77,57 @@ keep the operator out of the delivery path:
   at/after you sent). Broadcasts report against the full roster. Re-poll `bus_thread` to confirm a
   handoff landed (seen and/or acked) **without asking a human**; escalate only when `polled_after`
   stays false past a stated interval.
+
+### Doorbell reader health (#47)
+
+A doorbell ring returning `204` proves the ring was **written** to the seat's log. It does **not**
+prove anything is **reading** that log. The consuming session subscribes with a `tail -F` that dies
+silently on `/compact`, so "nobody is listening" and "transport dead" look identical: every layer
+reports healthy while the wake never happens. That gap once cost 30 minutes of confident,
+entirely wrong root-cause work naming a VPC binding that had never broken.
+
+The bus already holds both halves, so it computes the answer server-side. Every `bus_consumers` row
+carries:
+
+| Field | Meaning |
+|-------|---------|
+| `last_ring_delivered_at` | Most recent ring this consumer had a **2xx delivery** for (null: never). |
+| `last_message_consumed_at` | Most recent evidence the consumer **read the bus**: `max(last_poll_at, newest ack)` (null: no evidence ever). |
+| `undelivered_to_reader` | Count of rings delivered **strictly after** `last_message_consumed_at`, i.e. rung at a reader that has not read anything since. |
+| `oldest_undelivered_ring_at` | Oldest of those rings; null when the count is 0. This is the age term of the predicate. |
+| `doorbell_stale` | Derived: see the predicate below. |
+
+**The predicate.** `doorbell_stale` is true only when **all three** hold:
+
+1. `webhook === true` (registered AND enabled doorbell), and
+2. `undelivered_to_reader >= 3`, and
+3. `oldest_undelivered_ring_at` is at least **15 minutes** old.
+
+Each clause kills one class of false positive:
+
+- **(1)** a poll-only consumer has no doorbell to be broken, so it can never read stale.
+- **(2)** a single in-flight ring the session simply has not reached yet is not a fault. Three
+  consecutive unanswered rings is no longer a scheduling delay.
+- **(3)** a burst of three rings inside one turn is normal traffic. Fifteen minutes is comfortably
+  longer than any healthy session takes to notice a wake, and short enough to catch the fault inside
+  the same work session rather than after it.
+
+**A quiet channel can never trip it**: zero rings delivered means `undelivered_to_reader` is 0.
+Silence is not a fault, and this predicate never claims it is.
+
+**A consumer that is legitimately offline SHOULD read stale.** That is a **true positive**, not a
+false one. "Rings are landing where nothing is reading them" is exactly as true for a shut-down seat
+as for a session whose tail died, and the correct caller reaction is identical in both cases: do not
+assume that consumer was woken; reach it another way. The signal deliberately does not try to
+distinguish "offline" from "broken", because the sender does not need to care.
+
+**Recovery is automatic.** The moment the consumer polls or acks, its consumption watermark advances
+past the outstanding rings, `undelivered_to_reader` drops to 0, and `doorbell_stale` clears. There is
+nothing to reset by hand.
+
+This is a **read-side computation only**. It does not touch the doorbell wire contract (#40): the mux
+stays a dumb transparent proxy, HMAC stays end-to-end Worker to seat, and no per-consumer secret
+moves.
 
 ## Read / unread
 
