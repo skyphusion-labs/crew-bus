@@ -133,7 +133,7 @@ moves.
 
 #47 answers "is anyone reading rings for this consumer?" from the **sender** side. This section is
 the matching **session** rule: how you arm, prove you are armed, and refuse to misdiagnose the
-transport when your own tail is the fault. Write for a context that just started and knows nothing.
+transport when your own tail is the fault.
 
 **Why this exists.** A session once concluded the VPC doorbell path was dead and nearly shipped new
 DNS plus an HMAC rotation. Every layer was green; the session still never woke. The only hop with no
