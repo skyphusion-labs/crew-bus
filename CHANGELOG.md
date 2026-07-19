@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.2
+
+### #48 -- doorbell reader health (`doorbell_stale`, `undelivered_to_reader`)
+
+Incident driver: a doorbell ring returning 2xx proves the ring was **written** to the seat's log.
+It does **not** prove anything is **reading** it. `webhook: true` means ONLY that the ring hop
+returned 2xx; it is NOT evidence a reader was woken. Offline and broken are indistinguishable to
+the sender; the correct reaction is identical (do not assume that consumer was woken; reach it
+another way).
+
+- Every `bus_consumers` row gains additive fields: `last_ring_delivered_at`,
+  `last_message_consumed_at`, `undelivered_to_reader`, `oldest_undelivered_ring_at`, and
+  `doorbell_stale`.
+- `doorbell_stale` is true only when all three hold: webhook registered+enabled,
+  `undelivered_to_reader >= 3`, and the oldest unconsumed ring is at least 15 minutes old.
+- Read-side only over existing tables; no schema change, no change to the #40 wire contract.
+
+### #50 -- universal "monitoring your channel correctly" discipline
+
+- `docs/agent-discipline.md` gains the arm / prove-armed / poll-own-channel rule set both crews
+  read. Documents that `webhook: true` is not a wake proof, and that a legitimate offline seat
+  reading `doorbell_stale: true` is a true positive, not an incident.
+
 ## 0.6.1
 
 ### Release mechanics
