@@ -243,9 +243,20 @@ describe("store", () => {
     const roster = ["mackaye", "cursor-laptop"];
 
     let consumers = await listConsumers(db, roster);
+    // #47 added doorbell reader health to every row; a roster with no rings and
+    // no doorbells reports the quiet-channel baseline.
+    const quiet = {
+      last_poll_at: null,
+      webhook: false,
+      last_ring_delivered_at: null,
+      last_message_consumed_at: null,
+      undelivered_to_reader: 0,
+      oldest_undelivered_ring_at: null,
+      doorbell_stale: false,
+    };
     expect(consumers).toEqual([
-      { name: "mackaye", last_poll_at: null, webhook: false },
-      { name: "cursor-laptop", last_poll_at: null, webhook: false },
+      { name: "mackaye", ...quiet },
+      { name: "cursor-laptop", ...quiet },
     ]);
 
     await pollMessages(db, "cursor-laptop", { channel: "general" });

@@ -70,7 +70,7 @@ See [mcp/README.md](./mcp/README.md) for env vars and tool list.
 | `bus_thread` | Full ordered thread |
 | `bus_ack` | Acknowledge a message |
 | `bus_channels` | Channels + unread counts |
-| `bus_consumers` | Registered roster + each consumer's last_poll_at + webhook flag |
+| `bus_consumers` | Registered roster + last_poll_at + webhook flag + [doorbell reader health](docs/agent-discipline.md#doorbell-reader-health-47) |
 | `bus_webhook_set` | Register/replace your own doorbell webhook (https, HMAC secret) |
 | `bus_webhook_get` | Your own webhook config (secret masked) |
 | `bus_webhook_clear` | Unregister your own webhook |

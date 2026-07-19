@@ -159,7 +159,10 @@ export const TOOLS: ToolDef[] = [
     description:
       "List the registered consumer roster (valid recipients) with each consumer's last_poll_at " +
       "(null if never polled) and webhook (true when a doorbell endpoint is registered and enabled). " +
-      "Use to discover who is addressable.",
+      "Use to discover who is addressable. Each row also carries doorbell READER health (#47): " +
+      "last_ring_delivered_at, last_message_consumed_at, undelivered_to_reader, " +
+      "oldest_undelivered_ring_at, doorbell_stale. webhook=true only means the ring hop returned 2xx; " +
+      "doorbell_stale=true means rings are landing where nothing is reading them.",
     inputSchema: {},
     handler: (client) => client.consumers(),
   },

@@ -15,6 +15,8 @@ import {
   type WebhookEndpoint,
   type WebhookEndpointView,
   CHANNELS,
+  DOORBELL_STALE_MIN_AGE_MS,
+  DOORBELL_STALE_MIN_RINGS,
   MAX_AUTH_ENV_CHARS,
   MAX_BODY_BYTES,
   MAX_REF_CHARS,
@@ -317,19 +319,113 @@ export async function recordPoll(db: D1Database, consumer: string): Promise<void
     .run();
 }
 
+// #47 doorbell reader health, computed per consumer from data the bus already
+// holds. The failure this exists to catch: rings are delivered (2xx from the
+// seat listener) and land in a log file that NOTHING IS READING, because the
+// consuming session tail died on /compact. Delivered-but-never-consumed is the
+// exact signature, and it is entirely server-side computable.
+//
+// The consumption watermark is max(last_poll_at, newest ack). Both are
+// monotonic per consumer, so "did it read anything after this ring landed?"
+// reduces to a string compare against that single watermark (all timestamps are
+// Date#toISOString, so lexical order IS chronological order).
+interface DoorbellHealth {
+  last_ring_delivered_at: string | null;
+  last_message_consumed_at: string | null;
+  undelivered_to_reader: number;
+  oldest_undelivered_ring_at: string | null;
+  doorbell_stale: boolean;
+}
+
+async function doorbellHealth(
+  db: D1Database,
+  names: string[],
+  pollMap: Map<string, string | null>,
+  webhookNames: Set<string>,
+): Promise<Map<string, DoorbellHealth>> {
+  // Two roster-wide reads (not per consumer): every successful ring, and every
+  // ack. Both tables are bounded by the retention sweep.
+  const { results: ringRows } = await db
+    .prepare(
+      `SELECT consumer, delivered_at FROM webhook_deliveries
+       WHERE delivered_at IS NOT NULL ORDER BY delivered_at`,
+    )
+    .all<{ consumer: string; delivered_at: string }>();
+  const { results: ackRows } = await db
+    .prepare(`SELECT from_consumer, created_at FROM acks ORDER BY created_at`)
+    .all<{ from_consumer: string; created_at: string }>();
+
+  const ringsBy = new Map<string, string[]>();
+  for (const r of ringRows ?? []) {
+    const list = ringsBy.get(r.consumer);
+    if (list) list.push(r.delivered_at);
+    else ringsBy.set(r.consumer, [r.delivered_at]);
+  }
+  const lastAck = new Map<string, string>();
+  for (const a of ackRows ?? []) {
+    const prev = lastAck.get(a.from_consumer);
+    if (prev === undefined || a.created_at > prev) lastAck.set(a.from_consumer, a.created_at);
+  }
+
+  const staleBefore = new Date(Date.now() - DOORBELL_STALE_MIN_AGE_MS).toISOString();
+  const out = new Map<string, DoorbellHealth>();
+  for (const name of names) {
+    const rings = ringsBy.get(name) ?? [];
+    const poll = pollMap.get(name) ?? null;
+    const ack = lastAck.get(name) ?? null;
+    // Newest evidence the consumer read anything at all.
+    const consumed = poll === null ? ack : ack === null ? poll : poll > ack ? poll : ack;
+
+    let lastRing: string | null = null;
+    let oldestUnconsumed: string | null = null;
+    let unconsumed = 0;
+    for (const at of rings) {
+      if (lastRing === null || at > lastRing) lastRing = at;
+      if (consumed !== null && at <= consumed) continue;
+      unconsumed++;
+      if (oldestUnconsumed === null || at < oldestUnconsumed) oldestUnconsumed = at;
+    }
+
+    const stale =
+      webhookNames.has(name) &&
+      unconsumed >= DOORBELL_STALE_MIN_RINGS &&
+      oldestUnconsumed !== null &&
+      oldestUnconsumed <= staleBefore;
+
+    out.set(name, {
+      last_ring_delivered_at: lastRing,
+      last_message_consumed_at: consumed,
+      undelivered_to_reader: unconsumed,
+      oldest_undelivered_ring_at: oldestUnconsumed,
+      doorbell_stale: stale,
+    });
+  }
+  return out;
+}
+
 // Consumer discovery (#17.2): the registered roster (from the token map) joined
 // with each consumer's last_poll_at. Names with no poll row yet return null.
 // #26: also reports a webhook flag (registered AND enabled), no url/secret.
+// #47: also reports doorbell reader health, so `webhook: true` is no longer the
+// only thing a caller can check (it never meant rings reach a reader).
 export async function listConsumers(db: D1Database, names: string[]): Promise<ConsumerStatus[]> {
   const { results } = await db
     .prepare(`SELECT name, last_poll_at FROM consumers`)
     .all<{ name: string; last_poll_at: string | null }>();
   const pollMap = new Map((results ?? []).map((r) => [r.name, r.last_poll_at] as const));
   const webhookNames = await enabledWebhookConsumers(db);
+  const health = await doorbellHealth(db, names, pollMap, webhookNames);
   return names.map((name) => ({
     name,
     last_poll_at: pollMap.get(name) ?? null,
     webhook: webhookNames.has(name),
+    ...(health.get(name) ?? {
+      last_ring_delivered_at: null,
+      last_message_consumed_at: null,
+      undelivered_to_reader: 0,
+      oldest_undelivered_ring_at: null,
+      doorbell_stale: false,
+    }),
   }));
 }
 

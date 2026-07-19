@@ -322,6 +322,21 @@ export function makeFakeD1(
             .map((d) => ({ consumer: d.consumer, delivered_at: d.delivered_at, attempts: d.attempts }));
           return { results: rows as T[] };
         }
+        // #47: every successful ring, roster-wide (doorbell reader health).
+        if (/SELECT consumer, delivered_at FROM webhook_deliveries/i.test(sql) && /delivered_at IS NOT NULL/i.test(sql)) {
+          const rows = deliveries
+            .filter((d) => d.delivered_at !== null)
+            .map((d) => ({ consumer: d.consumer, delivered_at: d.delivered_at }))
+            .sort((a, b) => String(a.delivered_at).localeCompare(String(b.delivered_at)));
+          return { results: rows as T[] };
+        }
+        // #47: every ack, roster-wide (the second half of the consumption watermark).
+        if (/SELECT from_consumer, created_at FROM acks ORDER BY created_at/i.test(sql)) {
+          const rows = state.acks
+            .map((a) => ({ from_consumer: a.from_consumer, created_at: a.created_at }))
+            .sort((a, b) => a.created_at.localeCompare(b.created_at));
+          return { results: rows as T[] };
+        }
         // #26: consumers with an enabled endpoint (bus_consumers webhook flag).
         if (/SELECT consumer FROM webhook_endpoints WHERE enabled = 1/i.test(sql)) {
           const rows = endpoints.filter((e) => e.enabled === 1).map((e) => ({ consumer: e.consumer }));

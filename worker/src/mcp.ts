@@ -180,7 +180,12 @@ const TOOLS = [
       "List the registered consumer roster (valid bus_send recipients) with each consumer's " +
       "last_poll_at (null if never polled) and webhook (true when a doorbell endpoint is registered " +
       "and enabled; no url/secret exposed). Use to discover who is addressable and roughly when they " +
-      "last checked the bus.",
+      "last checked the bus. Doorbell READER health (#47): webhook only means the ring hop returned " +
+      "2xx, so each row also carries last_ring_delivered_at, last_message_consumed_at, " +
+      "undelivered_to_reader (rings delivered since that consumer last read anything), " +
+      "oldest_undelivered_ring_at, and doorbell_stale. doorbell_stale=true means rings are landing " +
+      "where nothing is reading them (a dead session tail, or a consumer that is simply offline); " +
+      "reach that consumer another way rather than assuming it was woken.",
     inputSchema: { type: "object", properties: {} },
   },
   {
