@@ -429,6 +429,20 @@ describe("webhook vpc target validation (#40)", () => {
     ).rejects.toThrow(/unknown vpc binding/);
   });
 
+  it("accepts RANCID_DOORBELL_VPC for a Cursor seat consumer", async () => {
+    const db = makeFakeD1(freshState());
+    const view = await setWebhook(db, "albini", {
+      vpc: { binding: "RANCID_DOORBELL_VPC" },
+      secret: "rancid-vpc-fake",
+    });
+    expect(view).toMatchObject({
+      consumer: "albini",
+      target_kind: "vpc",
+      vpc_binding: "RANCID_DOORBELL_VPC",
+      url: null,
+    });
+  });
+
   it("rejects both url and vpc (exactly one target)", async () => {
     const db = makeFakeD1(freshState());
     await expect(

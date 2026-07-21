@@ -31,7 +31,10 @@ database_id = "REPLACE_WITH_D1_ID"
 # stanza per box mux once its VPC service exists (service_id from the VPC service).
 # [[vpc_services]]
 # binding = "DISCHORD_DOORBELL_VPC"
-# service_id = "REPLACE_WITH_VPC_SERVICE_ID"
+# service_id = "REPLACE_WITH_DISCHORD_VPC_SERVICE_ID"
+# [[vpc_services]]
+# binding = "RANCID_DOORBELL_VPC"
+# service_id = "REPLACE_WITH_RANCID_VPC_SERVICE_ID"
 
 [triggers]
 crons = ["0 4 * * *"]

@@ -207,7 +207,7 @@ const TOOLS = [
           type: "object",
           description: "Private Workers VPC target (omit if using url): rings a per-box doorbell mux",
           properties: {
-            binding: { type: "string", description: "Declared VPC binding name (e.g. DISCHORD_DOORBELL_VPC)" },
+            binding: { type: "string", description: "Declared VPC binding name (e.g. DISCHORD_DOORBELL_VPC or RANCID_DOORBELL_VPC)" },
             consumer: { type: "string", description: "Optional; must equal your own consumer if given" },
           },
           required: ["binding"],
