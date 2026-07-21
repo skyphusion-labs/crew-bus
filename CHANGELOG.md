@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.3
+
+### fc#853 -- RANCID doorbell VPC mux (slice 3 live cutover)
+
+- Production `[[vpc_services]]` adds `RANCID_DOORBELL_VPC` bound to CF service
+  `rancid-doorbell-mux` (`019f8582-a6b0-78d3-b481-881789231bcd`) on tunnel `rancid-local`
+  -> mux `127.0.0.1:9870` on rancid. Sibling of `DISCHORD_DOORBELL_VPC` (fc#808).
+- Code allowlist for `RANCID_DOORBELL_VPC` shipped in v0.6.2 prep (crew-bus#54); this release
+  wires the live binding so rancid Cursor seats can flip webhook rows off public hooks.
+
 ## 0.6.2
 
 ### #48 -- doorbell reader health (`doorbell_stale`, `undelivered_to_reader`)
