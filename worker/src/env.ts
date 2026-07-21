@@ -7,7 +7,7 @@
 // doorbell. OPTIONAL so the Worker deploys before the VPC service is provisioned
 // (the vivijure-cf AUDIO_MIX_VPC mux-phase precedent); a registered-but-unbound
 // target logs and degrades to poll rather than throwing.
-export const VPC_DOORBELL_BINDINGS = ["DISCHORD_DOORBELL_VPC"] as const;
+export const VPC_DOORBELL_BINDINGS = ["DISCHORD_DOORBELL_VPC", "RANCID_DOORBELL_VPC"] as const;
 export type VpcDoorbellBinding = (typeof VPC_DOORBELL_BINDINGS)[number];
 export function isVpcDoorbellBinding(name: string): name is VpcDoorbellBinding {
   return (VPC_DOORBELL_BINDINGS as readonly string[]).includes(name);
@@ -18,6 +18,7 @@ export interface Env {
   // #40 doorbell VPC muxes (optional until provisioned). Keep this list in sync
   // with VPC_DOORBELL_BINDINGS above and wrangler.toml [[vpc_services]].
   DISCHORD_DOORBELL_VPC?: Fetcher;
+  RANCID_DOORBELL_VPC?: Fetcher;
   /** Comma-separated `consumer=token` entries. wrangler secret put MCP_TOKEN */
   MCP_TOKEN?: string;
   /** Message retention in days (default 30). */
