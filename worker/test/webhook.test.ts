@@ -43,6 +43,17 @@ describe("webhook registry (#26)", () => {
     ).rejects.toThrow(/https/);
   });
 
+  it("rejects auth_env that names a core Worker secret (#61)", async () => {
+    const db = makeFakeD1(freshState());
+    await expect(
+      setWebhook(db, "albini", {
+        url: "https://recv.example/hook",
+        secret: "fake",
+        auth_env: "MCP_TOKEN",
+      }),
+    ).rejects.toThrow(/auth_env must name a dedicated webhook Authorization secret/);
+  });
+
   it("registers, masks the secret in the view, and never exposes the value", async () => {
     const db = makeFakeD1(freshState());
     const view = await setWebhook(db, "albini", {

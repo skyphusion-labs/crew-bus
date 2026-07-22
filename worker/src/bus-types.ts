@@ -193,6 +193,26 @@ export interface WebhookEndpointView {
   updated_at: string;
 }
 
+/** Core Worker bindings that must never be referenced by webhook auth_env (#61). */
+export const AUTH_ENV_DENYLIST = new Set([
+  "DB",
+  "MCP_TOKEN",
+  "RETENTION_DAYS",
+  "DISCHORD_DOORBELL_VPC",
+  "RANCID_DOORBELL_VPC",
+]);
+
+/**
+ * auth_env may name only a dedicated webhook Authorization secret binding
+ * (e.g. ALBINI_AUTH), never a core Worker secret like MCP_TOKEN.
+ */
+export function isAllowedAuthEnv(name: string): boolean {
+  if (!name || name.length > MAX_AUTH_ENV_CHARS) return false;
+  if (!/^[A-Z][A-Z0-9_]*_AUTH$/.test(name)) return false;
+  if (AUTH_ENV_DENYLIST.has(name)) return false;
+  return true;
+}
+
 /** True only for an https:// URL. Doorbell endpoints must be TLS. */
 export function isHttpsUrl(value: string): boolean {
   try {

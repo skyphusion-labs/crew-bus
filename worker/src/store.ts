@@ -26,6 +26,7 @@ import {
   MAX_WEBHOOK_SECRET_CHARS,
   MAX_VPC_BINDING_CHARS,
   MAX_WEBHOOK_URL_CHARS,
+  isAllowedAuthEnv,
   isChannel,
   isHttpsUrl,
   isMessageType,
@@ -953,6 +954,11 @@ export async function setWebhook(
   const authEnv = input.auth_env != null ? String(input.auth_env).trim() : null;
   if (authEnv && authEnv.length > MAX_AUTH_ENV_CHARS) {
     throw new BusError(`auth_env is capped at ${MAX_AUTH_ENV_CHARS} chars`);
+  }
+  if (authEnv && !isAllowedAuthEnv(authEnv)) {
+    throw new BusError(
+      "auth_env must name a dedicated webhook Authorization secret (pattern: NAME_AUTH); core Worker bindings are rejected",
+    );
   }
   const enabled = input.enabled === undefined ? 1 : input.enabled ? 1 : 0;
   const now = nowIso();
