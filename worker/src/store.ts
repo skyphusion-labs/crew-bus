@@ -835,7 +835,7 @@ export async function markChannelSeenLatest(
     .bind(channel)
     .all<{ from_consumer: string; to_json: string; created_at: string; id: string }>();
 
-  let lastSeenAt = formatPollCursor(nowIso(), newId());
+  let lastSeenAt = formatPollCursor(nowIso(), newId("seen"));
   for (const row of results ?? []) {
     const to = JSON.parse(row.to_json) as string[];
     if (isVisibleTo(to, consumer) || row.from_consumer === consumer) {
