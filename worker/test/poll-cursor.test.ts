@@ -135,4 +135,50 @@ describe("poll cursor (#37)", () => {
     const after = await pollMessages(db, "mackaye", {});
     expect(after.messages).toHaveLength(0);
   });
+
+  it("same-ms messages are not dropped by the poll cursor", async () => {
+    const ts = "2026-07-22T01:02:03.000Z";
+    const state: FakeD1State = {
+      messages: [
+        {
+          id: "msg_a",
+          channel: "general",
+          thread_id: "thr_a",
+          from_consumer: "strummer",
+          to_json: JSON.stringify(["mackaye"]),
+          type: "status",
+          priority: "normal",
+          body: "first same ms",
+          refs_json: null,
+          requires_ack: 0,
+          ack_of: null,
+          created_at: ts,
+        },
+        {
+          id: "msg_b",
+          channel: "general",
+          thread_id: "thr_b",
+          from_consumer: "strummer",
+          to_json: JSON.stringify(["mackaye"]),
+          type: "status",
+          priority: "normal",
+          body: "second same ms",
+          refs_json: null,
+          requires_ack: 0,
+          ack_of: null,
+          created_at: ts,
+        },
+      ],
+      cursors: [],
+      acks: [],
+      consumers: [],
+    };
+    const db = makeFakeD1(state);
+
+    const first = await pollMessages(db, "mackaye", { limit: 1 });
+    expect(first.messages.map((m) => m.body)).toEqual(["first same ms"]);
+
+    const second = await pollMessages(db, "mackaye", { limit: 1 });
+    expect(second.messages.map((m) => m.body)).toEqual(["second same ms"]);
+  });
 });

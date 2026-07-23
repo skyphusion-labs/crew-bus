@@ -1,5 +1,7 @@
 /** Minimal in-memory D1 fake for store unit tests. */
 
+import { formatPollCursor, parsePollCursor } from "../src/store";
+
 export interface MessageRow {
   id: string;
   channel: string;
@@ -349,6 +351,19 @@ export function makeFakeD1(
             .sort((a, b) => a.created_at.localeCompare(b.created_at));
           return { results: rows as T[] };
         }
+        if (/SELECT from_consumer, to_json, created_at, id FROM messages WHERE channel = \? ORDER BY created_at DESC, id DESC/i.test(sql)) {
+          const channel = bound[0] as string;
+          const rows = state.messages
+            .filter((m) => m.channel === channel)
+            .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id))
+            .map((m) => ({
+              from_consumer: m.from_consumer,
+              to_json: m.to_json,
+              created_at: m.created_at,
+              id: m.id,
+            }));
+          return { results: rows as T[] };
+        }
         if (/SELECT from_consumer, to_json, created_at FROM messages WHERE channel = \? ORDER BY created_at DESC/i.test(sql)) {
           const channel = bound[0] as string;
           const rows = state.messages
@@ -357,11 +372,32 @@ export function makeFakeD1(
             .map((m) => ({ from_consumer: m.from_consumer, to_json: m.to_json, created_at: m.created_at }));
           return { results: rows as T[] };
         }
+        if (/SELECT from_consumer, to_json, created_at FROM messages WHERE channel = \? AND \(created_at > \? OR \(created_at = \? AND id > \?\)\)/i.test(sql)) {
+          const [channel, t1, t2, id] = bound as [string, string, string, string];
+          const rows = state.messages
+            .filter(
+              (m) =>
+                m.channel === channel &&
+                rowAfterCursor(m, formatPollCursor(t1, id), true),
+            )
+            .map((m) => ({ from_consumer: m.from_consumer, to_json: m.to_json, created_at: m.created_at }));
+          return { results: rows as T[] };
+        }
         if (/SELECT from_consumer, to_json, created_at FROM messages WHERE channel = \? AND created_at > \?/i.test(sql)) {
           const [channel, since] = bound as [string, string];
           const rows = state.messages
             .filter((m) => m.channel === channel && m.created_at > since)
             .map((m) => ({ from_consumer: m.from_consumer, to_json: m.to_json, created_at: m.created_at }));
+          return { results: rows as T[] };
+        }
+        if (/SELECT \* FROM messages WHERE \(created_at > \? OR \(created_at = \? AND id > \?\)\)/i.test(sql) && /channel = \?/i.test(sql)) {
+          const [t1, t2, id, channel, limit] = bound as [string, string, string, string, number];
+          const rows = filterPollRows(state.messages, formatPollCursor(t1, id), channel, true, limit);
+          return { results: rows as T[] };
+        }
+        if (/SELECT \* FROM messages WHERE \(created_at > \? OR \(created_at = \? AND id > \?\)\)/i.test(sql)) {
+          const [t1, t2, id, limit] = bound as [string, string, string, number];
+          const rows = filterPollRows(state.messages, formatPollCursor(t1, id), undefined, true, limit);
           return { results: rows as T[] };
         }
         if (/SELECT \* FROM messages WHERE created_at > \?/i.test(sql) && /channel = \?/i.test(sql)) {
@@ -406,6 +442,15 @@ export function makeFakeD1(
 
 // Mirrors the store's poll SQL: pure (created_at, id) ordering with the scan
 // LIMIT applied, so cursor-loss regressions are testable here.
+function rowAfterCursor(m: MessageRow, since: string, exclusive: boolean): boolean {
+  const { createdAt, id } = parsePollCursor(since);
+  if (m.created_at !== createdAt) {
+    return exclusive ? m.created_at > createdAt : m.created_at >= createdAt;
+  }
+  if (!id) return !exclusive;
+  return exclusive ? m.id > id : m.id >= id;
+}
+
 function filterPollRows(
   messages: MessageRow[],
   since: string,
@@ -413,9 +458,7 @@ function filterPollRows(
   exclusive: boolean,
   limit?: number,
 ): MessageRow[] {
-  let rows = messages.filter((m) =>
-    exclusive ? m.created_at > since : m.created_at >= since,
-  );
+  let rows = messages.filter((m) => rowAfterCursor(m, since, exclusive));
   if (channel) rows = rows.filter((m) => m.channel === channel);
   rows.sort(
     (a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id),

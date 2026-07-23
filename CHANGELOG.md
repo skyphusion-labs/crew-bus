@@ -1,3 +1,16 @@
+## 0.6.6
+
+### Fix (#984 K3)
+
+- Poll cursor uses composite `(created_at, id)` so same-millisecond messages are not dropped.
+
+## 0.6.5
+
+### Security (#61)
+
+- Reject `auth_env` values that name core Worker secrets (e.g. `MCP_TOKEN`). Only dedicated
+  webhook Authorization bindings matching `*_AUTH` are accepted at registration time.
+
 ## 0.6.4
 
 Release sync bump (2026-07-21). No functional changes in this tag.
