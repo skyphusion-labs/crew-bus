@@ -74,6 +74,56 @@ function rowToMessage(row: MessageRow): BusMessage {
 // every poll (regardless of the cursor) until acked; cap it to the oldest few.
 export const PENDING_ACK_CAP = 20;
 
+/** Composite poll cursor: created_at + id, so same-ms messages are not dropped. */
+export const POLL_CURSOR_SEP = "\x1f";
+
+export function formatPollCursor(createdAt: string, id: string): string {
+  return `${createdAt}${POLL_CURSOR_SEP}${id}`;
+}
+
+export function parsePollCursor(raw: string): { createdAt: string; id: string | null } {
+  const i = raw.indexOf(POLL_CURSOR_SEP);
+  if (i === -1) return { createdAt: raw, id: null };
+  return { createdAt: raw.slice(0, i), id: raw.slice(i + 1) || null };
+}
+
+export function comparePollCursors(a: string, b: string): number {
+  const pa = parsePollCursor(a);
+  const pb = parsePollCursor(b);
+  const byTime = pa.createdAt.localeCompare(pb.createdAt);
+  if (byTime !== 0) return byTime;
+  return (pa.id ?? "").localeCompare(pb.id ?? "");
+}
+
+function pollSinceClause(since: string | null): { clause: string; binds: unknown[] } {
+  if (since === null) {
+    return { clause: "created_at >= COALESCE(?, '1970-01-01T00:00:00.000Z')", binds: [since] };
+  }
+  const { createdAt, id } = parsePollCursor(since);
+  if (id) {
+    return {
+      clause: "(created_at > ? OR (created_at = ? AND id > ?))",
+      binds: [createdAt, createdAt, id],
+    };
+  }
+  return { clause: "created_at > ?", binds: [createdAt] };
+}
+
+function messageAtOrBeforeWatermark(m: BusMessage, watermark: string): boolean {
+  const wm = parsePollCursor(watermark);
+  if (m.created_at !== wm.createdAt) return m.created_at <= wm.createdAt;
+  if (!wm.id) return true;
+  return m.id <= wm.id;
+}
+
+function minPollCursor(cursors: Iterable<string>): string {
+  let min: string | null = null;
+  for (const c of cursors) {
+    if (min === null || comparePollCursors(c, min) < 0) min = c;
+  }
+  return min!;
+}
+
 /** A redelivered, still-unacked message. pending_ack distinguishes it from new traffic. */
 export type PendingAckMessage = BusMessage & { pending_ack: true; claim?: Claim | null };
 
@@ -470,15 +520,12 @@ export async function pollMessages(
   } else if (channel) {
     since = stored.get(channel) ?? null;
   } else {
-    since = CHANNELS.every((c) => stored.has(c)) ? [...stored.values()].sort()[0]! : null;
+    since = CHANNELS.every((c) => stored.has(c)) ? minPollCursor(stored.values()) : null;
   }
 
-  // Exclusive since: the watermark (stored or caller-passed) is the last row
-  // already delivered or marked seen.
-  const sinceClause =
-    since !== null ? "created_at > ?" : "created_at >= COALESCE(?, '1970-01-01T00:00:00.000Z')";
+  const { clause: sinceClause, binds: sinceBinds } = pollSinceClause(since);
   let query = `SELECT * FROM messages WHERE ${sinceClause}`;
-  const binds: unknown[] = [since];
+  const binds: unknown[] = [...sinceBinds];
 
   if (channel) {
     query += ` AND channel = ?`;
@@ -502,7 +549,7 @@ export async function pollMessages(
   const seenBefore = (m: BusMessage): boolean => {
     if (explicitSince !== undefined) return false;
     const watermark = stored.get(m.channel);
-    return watermark !== undefined && m.created_at <= watermark;
+    return watermark !== undefined && messageAtOrBeforeWatermark(m, watermark);
   };
   // Own sends are excluded from poll results (bus_send already returned them)
   // but still advance the cursor below via the raw scan window.
@@ -517,9 +564,11 @@ export async function pollMessages(
   // messages for other consumers would pin the cursor forever).
   let cursor: string | null = null;
   if (visible.length > limit) {
-    cursor = messages[messages.length - 1]!.created_at;
+    const last = messages[messages.length - 1]!;
+    cursor = formatPollCursor(last.created_at, last.id);
   } else if (raw.length) {
-    cursor = raw[raw.length - 1]!.created_at;
+    const last = raw[raw.length - 1]!;
+    cursor = formatPollCursor(last.created_at, last.id);
   }
 
   // #37: persist the watermark FORWARD-ONLY so the next bare poll resumes
@@ -532,7 +581,7 @@ export async function pollMessages(
     const touched: readonly Channel[] = channel ? [channel] : CHANNELS;
     for (const ch of touched) {
       const prev = stored.get(ch);
-      if (prev === undefined || advanceTo > prev) {
+      if (prev === undefined || comparePollCursors(advanceTo, prev) > 0) {
         await markChannelSeen(db, consumer, ch, advanceTo);
       }
     }
@@ -612,9 +661,10 @@ async function unreadForChannel(db: D1Database, consumer: string, channel: Chann
     .first<{ last_seen_at: string | null }>();
 
   const since = cursorRow?.last_seen_at ?? "1970-01-01T00:00:00.000Z";
+  const { clause, binds } = pollSinceClause(since);
   const { results } = await db
-    .prepare(`SELECT from_consumer, to_json, created_at FROM messages WHERE channel = ? AND created_at > ?`)
-    .bind(channel, since)
+    .prepare(`SELECT from_consumer, to_json, created_at FROM messages WHERE channel = ? AND ${clause}`)
+    .bind(channel, ...binds)
     .all<{ from_consumer: string; to_json: string; created_at: string }>();
 
   let count = 0;
@@ -779,15 +829,17 @@ export async function markChannelSeenLatest(
   if (!isChannel(channel)) throw new BusError(`invalid channel: ${channel}`);
 
   const { results } = await db
-    .prepare(`SELECT from_consumer, to_json, created_at FROM messages WHERE channel = ? ORDER BY created_at DESC`)
+    .prepare(
+      `SELECT from_consumer, to_json, created_at, id FROM messages WHERE channel = ? ORDER BY created_at DESC, id DESC`,
+    )
     .bind(channel)
-    .all<{ from_consumer: string; to_json: string; created_at: string }>();
+    .all<{ from_consumer: string; to_json: string; created_at: string; id: string }>();
 
-  let lastSeenAt = nowIso();
+  let lastSeenAt = formatPollCursor(nowIso(), newId());
   for (const row of results ?? []) {
     const to = JSON.parse(row.to_json) as string[];
     if (isVisibleTo(to, consumer) || row.from_consumer === consumer) {
-      lastSeenAt = row.created_at;
+      lastSeenAt = formatPollCursor(row.created_at, row.id);
       break;
     }
   }
