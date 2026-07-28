@@ -32,9 +32,13 @@ database_id = "REPLACE_WITH_D1_ID"
 # [[vpc_services]]
 # binding = "DISCHORD_DOORBELL_VPC"
 # service_id = "REPLACE_WITH_DISCHORD_VPC_SERVICE_ID"
-# [[vpc_services]]
-# binding = "RANCID_DOORBELL_VPC"
-# service_id = "REPLACE_WITH_RANCID_VPC_SERVICE_ID"
+#
+# RANCID_DOORBELL_VPC was the second stanza and is RETIRED (2026-07-28, fleet-chezmoi fc#1162):
+# the Cursor lane on rancid is gone and that box is now a no-sessions warm standby. Note that the
+# PRODUCTION wrangler.toml is not this file and is not in git (see .gitignore; CI materializes it
+# from an encrypted Actions secret), so the live binding only disappears once that blob drops the
+# stanza and the Worker redeploys. Drop the binding BEFORE deleting the VPC service, or the next
+# deploy fails against a dead service_id.
 
 [triggers]
 crons = ["0 4 * * *"]

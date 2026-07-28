@@ -440,18 +440,18 @@ describe("webhook vpc target validation (#40)", () => {
     ).rejects.toThrow(/unknown vpc binding/);
   });
 
-  it("accepts RANCID_DOORBELL_VPC for a Cursor seat consumer", async () => {
+  // RANCID_DOORBELL_VPC retired 2026-07-28 (fleet-chezmoi fc#1162). The assertion is inverted
+  // rather than deleted: a retired binding must be REJECTED, and that is worth a test, because
+  // the failure it guards against (a webhook row pointing at a box with no listener) is silent
+  // by design -- delivery just degrades to poll and logs webhook_vpc_binding_missing.
+  it("rejects the retired RANCID_DOORBELL_VPC binding", async () => {
     const db = makeFakeD1(freshState());
-    const view = await setWebhook(db, "albini", {
-      vpc: { binding: "RANCID_DOORBELL_VPC" },
-      secret: "rancid-vpc-fake",
-    });
-    expect(view).toMatchObject({
-      consumer: "albini",
-      target_kind: "vpc",
-      vpc_binding: "RANCID_DOORBELL_VPC",
-      url: null,
-    });
+    await expect(
+      setWebhook(db, "albini", {
+        vpc: { binding: "RANCID_DOORBELL_VPC" },
+        secret: "rancid-vpc-fake",
+      }),
+    ).rejects.toThrow(/unknown vpc binding/);
   });
 
   it("rejects both url and vpc (exactly one target)", async () => {
