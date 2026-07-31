@@ -7,7 +7,13 @@
 // doorbell. OPTIONAL so the Worker deploys before the VPC service is provisioned
 // (the vivijure-cf AUDIO_MIX_VPC mux-phase precedent); a registered-but-unbound
 // target logs and degrades to poll rather than throwing.
-export const VPC_DOORBELL_BINDINGS = ["DISCHORD_DOORBELL_VPC", "RANCID_DOORBELL_VPC"] as const;
+//
+// RANCID_DOORBELL_VPC retired 2026-07-28 (fleet-chezmoi fc#1162, refs fc#1068/fc#1069): the
+// Cursor lane on rancid is gone, its doorbell mux unit and stack are absent, and nothing
+// listens on that box's :9870. rancid is now a no-sessions warm standby, so it has no seat
+// listener to ring. The allowlist is the thing that stops a webhook row naming a binding the
+// Worker cannot route, so a retired box has to come OFF it.
+export const VPC_DOORBELL_BINDINGS = ["DISCHORD_DOORBELL_VPC"] as const;
 export type VpcDoorbellBinding = (typeof VPC_DOORBELL_BINDINGS)[number];
 export function isVpcDoorbellBinding(name: string): name is VpcDoorbellBinding {
   return (VPC_DOORBELL_BINDINGS as readonly string[]).includes(name);
@@ -18,7 +24,6 @@ export interface Env {
   // #40 doorbell VPC muxes (optional until provisioned). Keep this list in sync
   // with VPC_DOORBELL_BINDINGS above and wrangler.toml [[vpc_services]].
   DISCHORD_DOORBELL_VPC?: Fetcher;
-  RANCID_DOORBELL_VPC?: Fetcher;
   /** Comma-separated `consumer=token` entries. wrangler secret put MCP_TOKEN */
   MCP_TOKEN?: string;
   /** Message retention in days (default 30). */
