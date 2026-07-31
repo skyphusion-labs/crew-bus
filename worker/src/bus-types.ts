@@ -193,7 +193,12 @@ export interface WebhookEndpointView {
   updated_at: string;
 }
 
-/** Core Worker bindings that must never be referenced by webhook auth_env (#61). */
+/**
+ * Core Worker bindings that must never be referenced by webhook auth_env (#61).
+ * RANCID_DOORBELL_VPC stays listed although the binding itself retired 2026-07-28
+ * (fleet-chezmoi fc#1162): a denylist entry for a name that no longer exists costs nothing,
+ * while removing it would be a loosening for zero benefit.
+ */
 export const AUTH_ENV_DENYLIST = new Set([
   "DB",
   "MCP_TOKEN",

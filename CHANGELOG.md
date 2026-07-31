@@ -1,3 +1,27 @@
+## Unreleased
+
+### Chore -- retire `RANCID_DOORBELL_VPC` (fleet-chezmoi fc#1162; refs fc#1068, fc#1069)
+
+Reverses the 0.6.3 wiring. The Cursor lane on rancid is retired, the `rancid-doorbell-mux` unit
+and stack are gone, nothing listens on that box's `:9870`, and rancid is now the crew's
+no-sessions warm standby, so it has no seat listener to ring.
+
+- `RANCID_DOORBELL_VPC` removed from `VPC_DOORBELL_BINDINGS` and from the hand-authored `Env`
+  interface (`worker-configuration.d.ts` stays ungenerated, per the standing Workers convention),
+  from the `bus_webhook_set` tool description, and from `wrangler.toml.example`.
+- Kept in `AUTH_ENV_DENYLIST`: a denylist entry for a name that no longer exists is free, and
+  dropping it would be a loosening for no benefit.
+- The test that asserted the binding was accepted is inverted rather than deleted: a retired
+  binding must now be rejected at registration.
+- **Live binding is NOT removed by this PR.** The production `wrangler.toml` is gitignored and
+  materialized in CI from an encrypted Actions secret, so the deployed `[[vpc_services]]` stanza
+  has to be dropped there and the Worker redeployed. Order: binding out of the Worker first, then
+  delete the CF VPC service, or the next deploy fails against a dead `service_id`.
+- **Open, not fixed here:** the `webhook_endpoints` row for `albini` still targets
+  `RANCID_DOORBELL_VPC` and is enabled, so that seat's doorbell currently rings a service with no
+  origin and silently degrades to poll. It should be re-pointed at `DISCHORD_DOORBELL_VPC` by a
+  holder of albini's own bus token. Tracked on fleet-chezmoi fc#1162.
+
 ## 0.6.6
 
 ### Fix (#984 K3)
