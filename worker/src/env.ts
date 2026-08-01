@@ -26,6 +26,18 @@ export interface Env {
   DISCHORD_DOORBELL_VPC?: Fetcher;
   /** Comma-separated `consumer=token` entries. wrangler secret put MCP_TOKEN */
   MCP_TOKEN?: string;
+  /**
+   * ADDITIVE second roster secret, same comma-separated `consumer=token` format
+   * (fleet-chezmoi #1070). wrangler secret put MCP_TOKEN_EXTRA
+   *
+   * Workers secrets are write-only, so growing the roster by rewriting MCP_TOKEN
+   * means re-supplying every existing entry, and one typo silently 401s that
+   * consumer. Two comma-separated secrets concatenate into one valid roster, so
+   * new consumers land here and MCP_TOKEN is never touched. Read it ONLY via
+   * rosterSecret() in auth.ts, never directly: a call site that reads MCP_TOKEN
+   * alone sees a partial roster and 401s everyone in this secret.
+   */
+  MCP_TOKEN_EXTRA?: string;
   /** Message retention in days (default 30). */
   RETENTION_DAYS?: string;
   // #26 doorbell webhooks: webhook_endpoints.auth_env holds the NAME of a

@@ -1,6 +1,6 @@
 import type { Env } from "./env";
 import { BusError, clientErrorMessage } from "./bus-error";
-import { json, matchConsumer, bearerToken, consumerNames } from "./auth";
+import { bearerToken, consumerNames, json, matchConsumer, rosterSecret } from "./auth";
 import { CHANNELS, MESSAGE_TYPES, PRIORITIES, isChannel } from "./bus-types";
 import { VERSION } from "./version";
 import {
@@ -277,7 +277,7 @@ async function callTool(
 ): Promise<{ content: { type: "text"; text: string }[]; isError?: boolean }> {
   switch (name) {
     case "bus_send": {
-      const roster = consumerNames(env.MCP_TOKEN);
+      const roster = consumerNames(rosterSecret(env));
       const message = await sendMessage(
         env.DB,
         consumer,
@@ -313,7 +313,7 @@ async function callTool(
     case "bus_thread": {
       const threadId = String(args.thread_id ?? "").trim();
       if (!threadId) throw new BusError("thread_id is required");
-      const messages = await getThread(env.DB, threadId, consumer, consumerNames(env.MCP_TOKEN));
+      const messages = await getThread(env.DB, threadId, consumer, consumerNames(rosterSecret(env)));
       return toolText({ ok: true, thread_id: threadId, count: messages.length, messages });
     }
     case "bus_ack": {
@@ -343,7 +343,7 @@ async function callTool(
       return toolText({ ok: true, consumer, channels });
     }
     case "bus_consumers": {
-      const consumers = await listConsumers(env.DB, consumerNames(env.MCP_TOKEN));
+      const consumers = await listConsumers(env.DB, consumerNames(rosterSecret(env)));
       return toolText({ ok: true, consumers });
     }
     case "bus_webhook_set": {
@@ -428,7 +428,7 @@ async function handleRpc(
 }
 
 export async function handleMcp(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-  const consumer = matchConsumer(env.MCP_TOKEN, bearerToken(request));
+  const consumer = matchConsumer(rosterSecret(env), bearerToken(request));
   if (!consumer) {
     return json({ error: "unauthorized" }, 401, { "WWW-Authenticate": "Bearer" });
   }

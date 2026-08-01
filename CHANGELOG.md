@@ -1,5 +1,40 @@
 ## Unreleased
 
+### Fix -- additive roster secret `MCP_TOKEN_EXTRA` (fleet-chezmoi fc#1070)
+
+Two parallel Claude contexts both authenticate to the bus as consumer `mackaye`, so each
+context's sends are filtered from the other as "own sends", self-addressed messages get no
+delivery row, and the two share one server-side cursor that advances past what the other never
+read. The fix is per-context consumer identities, which means growing the roster.
+
+Growing it by rewriting `MCP_TOKEN` is rejected: Workers secrets are write-only, so that is a
+full-roster rewrite in which one missing or mistyped entry silently locks that consumer off the
+bus with a flat 401, indistinguishable from a bad client config.
+
+- **New optional secret `MCP_TOKEN_EXTRA`**, same comma-separated `consumer=token` format, added
+  to the hand-authored `Env`. `wrangler secret put MCP_TOKEN_EXTRA`.
+- **`rosterSecret(env)`** in `auth.ts` joins `MCP_TOKEN` and `MCP_TOKEN_EXTRA` into one roster.
+  `parseConsumers` is unchanged: two comma-separated secrets concatenate into one valid secret,
+  which is the point of joining rather than parsing twice. All nine consumer-lookup call sites in
+  `auth.ts`, `api.ts` and `mcp.ts` now read the joined roster.
+- **`MCP_TOKEN` is never touched, so existing consumers cannot break** whatever
+  `MCP_TOKEN_EXTRA` contains. That is the whole reason for this shape.
+- **Duplicate-name guard.** `matchConsumer` returns the FIRST match, so a name present in both
+  secrets would let two different tokens authenticate as one identity: the exact identity
+  collapse this change exists to remove, reintroduced one layer down. `rosterSecret` joins
+  `MCP_TOKEN` first and `dedupeByName` keeps the first entry per name, so the ambiguous later
+  token authenticates as nobody and the collision is logged as `consumer_name_collision` by NAME
+  (never a token value). Fail mode is log-and-prefer-`MCP_TOKEN` rather than a global refusal: a
+  global fail-closed would 401 the entire bus on one typo in the additive secret, and dropping
+  both copies of a colliding name would break a live consumer. This is still fail-closed on the
+  ambiguity, scoped to the misconfigured entry.
+- `MCP_TOKEN_EXTRA` added to `AUTH_ENV_DENYLIST` alongside `MCP_TOKEN`, so a webhook `auth_env`
+  can never name it. The `*_AUTH` regex already rejected it; the denylist entry is free and keeps
+  the two roster secrets symmetric.
+- Not in this change, by ruling: no token is minted or placed, and the own-send filter, the
+  delivery-recipient filter and the cursor advance in `store.ts` are untouched. All three are
+  correct for one-consumer-one-context and only misbehave because two contexts share an identity.
+
 ### Chore -- retire `RANCID_DOORBELL_VPC` (fleet-chezmoi fc#1162; refs fc#1068, fc#1069)
 
 Reverses the 0.6.3 wiring. The Cursor lane on rancid is retired, the `rancid-doorbell-mux` unit

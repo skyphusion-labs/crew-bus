@@ -30,7 +30,12 @@ Set secrets for local dev in `.dev.vars`:
 
 ```
 MCP_TOKEN=cursor-laptop=dev-cursor,lead=dev-lead
+MCP_TOKEN_EXTRA=lead-fleet=dev-lead-fleet
 ```
+
+`MCP_TOKEN_EXTRA` is optional and purely additive: it is joined onto `MCP_TOKEN` to form one
+roster, so new consumers can be added without rewriting the write-only `MCP_TOKEN` secret. A
+consumer name present in both is refused in `MCP_TOKEN_EXTRA` (first entry wins) and logged.
 
 Health: `curl http://localhost:8787/health`
 
@@ -92,7 +97,9 @@ questions; git complement; [monitor your channel correctly](./docs/agent-discipl
 
 ## Self-host notes
 
-- Per-consumer bearer tokens: comma-separated `name=token` in Worker secret `MCP_TOKEN`
+- Per-consumer bearer tokens: comma-separated `name=token` in Worker secret `MCP_TOKEN`,
+  plus the optional additive `MCP_TOKEN_EXTRA` (same format, joined onto the first; add
+  consumers there so the write-only `MCP_TOKEN` never has to be re-supplied in full)
 - Default channels: `vivijure`, `postern`, `common-thread`, `fleet`, `general` (edit in Worker source if needed)
 - Broadcast: `to: ["*"]`; retention: 30 days (daily cron purge); no rate limits in v1
 
