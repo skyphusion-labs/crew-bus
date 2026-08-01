@@ -1,3 +1,34 @@
+## Unreleased (mcp client)
+
+### Fix -- the stdio client advertised a version it never had (`0.1.0`)
+
+Incident driver: `mcp/src/index.ts` passed a hardcoded `version: "0.1.0"` to `McpServer`, so every
+MCP host that asked the client who it was got an answer that was wrong by six minor versions. It was
+never even a released number: npm has `0.1.2, 0.2.0, 0.3.0, 0.4.0, 0.6.1`, and no `0.1.0`. Any host
+logging client versions to reason about capability was reading fiction.
+
+This is the **same defect, with the same literal**, that `worker/src/version.ts` was created to kill.
+That file's own comment says so: *"so /health and MCP serverInfo cannot drift from the released code
+the way the hardcoded 0.1.0 did."* The Worker got the fix and the guard; the client kept the bug.
+
+- `mcp/src/version.ts` added, mirroring `worker/src/version.ts`, and `serverInfo` now reads it.
+- `mcp/test/version.test.ts` asserts it equals `mcp/package.json`, plus a regression pin that it is
+  not `"0.1.0"`. Both were watched failing against the reintroduced literal before being made green.
+- A guarded literal rather than `import pkg from "../package.json"`: `mcp/tsconfig.json` sets
+  `rootDir: "src"`, so importing above it breaks the build. The copy is acceptable only because the
+  test makes a drifted copy impossible to ship.
+
+**Version deliberately NOT bumped, held at `0.6.5`.** Publishing is what claims a number, and
+`0.6.5` has never been published, so it is unclaimed and this fix ships inside it.
+
+**Related finding, worth knowing before the next `crew-bus-v*` tag.** npm's latest is **`0.6.1`**
+while `mcp/package.json` says `0.6.5`: `0.6.2` through `0.6.5` were bumped and never published,
+because past Worker releases moved the client version in lockstep even when no client file changed.
+The two are separate release trains by design (`v*` deploys the Worker, `crew-bus-v*` publishes the
+client), so that lockstep was the drift. The unpublished delta since `0.6.1` is small and safe: one
+`bus_consumers` tool-description update (doorbell reader health, #47) and dependency bumps. A
+`crew-bus-v0.6.5` tag therefore publishes that delta plus this fix, not this fix alone.
+
 ## 0.7.0
 
 MINOR, not a patch: `MCP_TOKEN_EXTRA` is a new optional secret binding on the hand-authored

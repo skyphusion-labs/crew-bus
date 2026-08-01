@@ -6,6 +6,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CrewBusClient } from "./client.js";
 import { registerTools } from "./tools.js";
+import { VERSION } from "./version.js";
 
 function requireEnv(name: string): string {
   const v = (process.env[name] ?? "").trim();
@@ -40,7 +41,7 @@ async function main(): Promise<void> {
   const connectIp = await resolveConnectIp(apiUrl);
 
   const client = new CrewBusClient(apiUrl, token, { timeoutMs, connectIp });
-  const server = new McpServer({ name: "crew-bus-mcp", version: "0.1.0" });
+  const server = new McpServer({ name: "crew-bus-mcp", version: VERSION });
   const registered = registerTools(server, client);
 
   console.error(`crew-bus-mcp: ready (${registered.length} tools: ${registered.join(", ")}) -> ${apiUrl}`);
