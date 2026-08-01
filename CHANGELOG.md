@@ -1,11 +1,25 @@
-## Unreleased
+## 0.7.0
+
+MINOR, not a patch: `MCP_TOKEN_EXTRA` is a new optional secret binding on the hand-authored
+`Env`, which is new capability rather than a fix to existing behaviour. Ships two changes that
+had both been sitting unreleased against a live `0.6.6`.
+
+**Deploy ordering, read before tagging.** This is the first release carrying the
+`RANCID_DOORBELL_VPC` retirement below. That entry records that the live binding is NOT removed
+by code: the production `wrangler.toml` is gitignored and materialized in CI from the
+`SKYPHUSION_WRANGLER_TOML` secret. If that blob still declares a `[[vpc_services]]` stanza whose
+CF VPC service has already been deleted, `wrangler deploy` fails against a dead `service_id`.
+Confirm blob and service agree before pushing the tag. Nothing in this release requires a schema
+change; the D1 migrations step is a no-op (`0001` only, already applied, and the step is
+idempotent).
 
 ### Fix -- additive roster secret `MCP_TOKEN_EXTRA` (fleet-chezmoi fc#1070)
 
-Two parallel Claude contexts both authenticate to the bus as consumer `mackaye`, so each
-context's sends are filtered from the other as "own sends", self-addressed messages get no
-delivery row, and the two share one server-side cursor that advances past what the other never
-read. The fix is per-context consumer identities, which means growing the roster.
+Incident driver: two parallel Claude contexts both authenticate to the bus as consumer
+`mackaye`, so each context's sends are filtered from the other as "own sends", self-addressed
+messages get no delivery row, and the two share one server-side cursor that advances past what
+the other never read. Conrad had been hand-relaying between contexts for an entire sprint. The
+fix is per-context consumer identities, which means growing the roster.
 
 Growing it by rewriting `MCP_TOKEN` is rejected: Workers secrets are write-only, so that is a
 full-roster rewrite in which one missing or mistyped entry silently locks that consumer off the
@@ -16,7 +30,11 @@ bus with a flat 401, indistinguishable from a bad client config.
 - **`rosterSecret(env)`** in `auth.ts` joins `MCP_TOKEN` and `MCP_TOKEN_EXTRA` into one roster.
   `parseConsumers` is unchanged: two comma-separated secrets concatenate into one valid secret,
   which is the point of joining rather than parsing twice. All nine consumer-lookup call sites in
-  `auth.ts`, `api.ts` and `mcp.ts` now read the joined roster.
+  `auth.ts`, `api.ts` and `mcp.ts` now read the joined roster. The implementation ruling
+  enumerated six and missed three in `mcp.ts`, including `handleMcp`, where every MCP request
+  authenticates: left unconverted it would have 401'd every new per-context identity on the MCP
+  transport while REST accepted them, and a flat 401 reads as a bad client config. Found by a
+  tree-wide grep carrying a positive control, not by re-reading the edited lines.
 - **`MCP_TOKEN` is never touched, so existing consumers cannot break** whatever
   `MCP_TOKEN_EXTRA` contains. That is the whole reason for this shape.
 - **Duplicate-name guard.** `matchConsumer` returns the FIRST match, so a name present in both
@@ -37,7 +55,7 @@ bus with a flat 401, indistinguishable from a bad client config.
 
 ### Chore -- retire `RANCID_DOORBELL_VPC` (fleet-chezmoi fc#1162; refs fc#1068, fc#1069)
 
-Reverses the 0.6.3 wiring. The Cursor lane on rancid is retired, the `rancid-doorbell-mux` unit
+Incident driver: reverses the 0.6.3 wiring. The Cursor lane on rancid is retired, the `rancid-doorbell-mux` unit
 and stack are gone, nothing listens on that box's `:9870`, and rancid is now the crew's
 no-sessions warm standby, so it has no seat listener to ring.
 
