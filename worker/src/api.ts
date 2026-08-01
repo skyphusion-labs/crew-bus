@@ -1,5 +1,5 @@
 import type { Env } from "./env";
-import { bearerToken, consumerNames, json, matchConsumer, requireConsumer } from "./auth";
+import { bearerToken, consumerNames, json, matchConsumer, requireConsumer, rosterSecret } from "./auth";
 import { BusError, clientErrorMessage } from "./bus-error";
 import { CHANNELS, isChannel } from "./bus-types";
 import {
@@ -39,7 +39,7 @@ export async function handleApi(
   try {
     if (pathname === "/api/send" && request.method === "POST") {
       const body = await readJson(request);
-      const roster = consumerNames(env.MCP_TOKEN);
+      const roster = consumerNames(rosterSecret(env));
       const message = await sendMessage(
         env.DB,
         consumer,
@@ -81,7 +81,7 @@ export async function handleApi(
 
     if (pathname.startsWith("/api/thread/") && request.method === "GET") {
       const threadId = decodeURIComponent(pathname.slice("/api/thread/".length));
-      const messages = await getThread(env.DB, threadId, consumer, consumerNames(env.MCP_TOKEN));
+      const messages = await getThread(env.DB, threadId, consumer, consumerNames(rosterSecret(env)));
       return json({ ok: true, thread_id: threadId, count: messages.length, messages });
     }
 
@@ -113,7 +113,7 @@ export async function handleApi(
     }
 
     if (pathname === "/api/consumers" && request.method === "GET") {
-      const consumers = await listConsumers(env.DB, consumerNames(env.MCP_TOKEN));
+      const consumers = await listConsumers(env.DB, consumerNames(rosterSecret(env)));
       return json({ ok: true, consumers });
     }
 
@@ -184,7 +184,7 @@ export async function handleApi(
 }
 
 export function logAuth(request: Request, env: Env): void {
-  const consumer = matchConsumer(env.MCP_TOKEN, bearerToken(request));
+  const consumer = matchConsumer(rosterSecret(env), bearerToken(request));
   if (consumer) {
     console.log(JSON.stringify({ event: "auth", consumer }));
   }

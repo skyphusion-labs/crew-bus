@@ -202,6 +202,7 @@ export interface WebhookEndpointView {
 export const AUTH_ENV_DENYLIST = new Set([
   "DB",
   "MCP_TOKEN",
+  "MCP_TOKEN_EXTRA",
   "RETENTION_DAYS",
   "DISCHORD_DOORBELL_VPC",
   "RANCID_DOORBELL_VPC",

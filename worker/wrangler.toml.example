@@ -1,12 +1,16 @@
-# crew-bus Worker — wrangler config example.
+# crew-bus Worker -- wrangler config example.
 # Copy to wrangler.toml and fill D1 database_id after: wrangler d1 create crew-bus
 #
 # Production config is NOT committed. CI materializes it from the
 # SKYPHUSION_WRANGLER_TOML Actions secret (see scripts/materialize-config.mjs).
 #
 # Secrets (wrangler secret put):
-#   MCP_TOKEN — comma-separated per-consumer tokens, e.g.:
+#   MCP_TOKEN -- comma-separated per-consumer tokens, e.g.:
 #     alice=...,bob=...
+#   MCP_TOKEN_EXTRA -- OPTIONAL additive second roster secret, same format. Joined
+#     onto MCP_TOKEN by rosterSecret() in auth.ts to form one roster, so consumers
+#     can be added without re-supplying the write-only MCP_TOKEN in full. A name
+#     present in both is refused here (MCP_TOKEN wins) and logged.
 #   <AUTH_ENV_NAME> -- optional per-webhook Authorization value; a webhook row's
 #     auth_env NAMES this binding (real credential stays in wrangler secrets).
 
