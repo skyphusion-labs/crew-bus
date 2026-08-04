@@ -14,7 +14,7 @@ describe("store", () => {
   it("send, poll with exclusive since, and ack round-trip", async () => {
     const db = makeFakeD1();
 
-    const sent = await sendMessage(db, "cursor-laptop", {
+    const sent = await sendMessage(db, "conrad", {
       channel: "general",
       to: ["*"],
       type: "ping",
@@ -34,7 +34,7 @@ describe("store", () => {
     const ack = await ackMessage(db, "mackaye", sent.id, "got it");
     expect(ack.type).toBe("ack");
     expect(ack.ack_of).toBe(sent.id);
-    expect(ack.to).toEqual(["cursor-laptop"]);
+    expect(ack.to).toEqual(["conrad"]);
   });
 
   it("polls in created_at order with priority surfaced as a field", async () => {
@@ -42,7 +42,7 @@ describe("store", () => {
 
     await sendMessage(db, "mackaye", {
       channel: "vivijure",
-      to: ["cursor-laptop"],
+      to: ["conrad"],
       type: "status",
       priority: "normal",
       body: "normal first chronologically",
@@ -50,13 +50,13 @@ describe("store", () => {
     await new Promise((r) => setTimeout(r, 2));
     await sendMessage(db, "mackaye", {
       channel: "vivijure",
-      to: ["cursor-laptop"],
+      to: ["conrad"],
       type: "question",
       priority: "blocking",
       body: "blocking gate",
     });
 
-    const page = await pollMessages(db, "cursor-laptop", { channel: "vivijure" });
+    const page = await pollMessages(db, "conrad", { channel: "vivijure" });
     expect(page.messages.map((m) => m.priority)).toEqual(["normal", "blocking"]);
   });
 
@@ -66,7 +66,7 @@ describe("store", () => {
     for (let i = 0; i < 3; i++) {
       await sendMessage(db, "mackaye", {
         channel: "vivijure",
-        to: ["cursor-laptop"],
+        to: ["conrad"],
         type: "status",
         body: `msg ${i}`,
       });
@@ -76,7 +76,7 @@ describe("store", () => {
     const seen: string[] = [];
     let since: string | undefined;
     for (let round = 0; round < 5 && seen.length < 3; round++) {
-      const page = await pollMessages(db, "cursor-laptop", {
+      const page = await pollMessages(db, "conrad", {
         channel: "vivijure",
         since,
         limit: 1,
@@ -95,25 +95,25 @@ describe("store", () => {
       channel: "vivijure",
       to: ["someone-else"],
       type: "status",
-      body: "not for cursor-laptop",
+      body: "not for conrad",
     });
     await new Promise((r) => setTimeout(r, 2));
 
-    const first = await pollMessages(db, "cursor-laptop", { channel: "vivijure" });
+    const first = await pollMessages(db, "conrad", { channel: "vivijure" });
     expect(first.messages).toHaveLength(0);
     expect(first.cursor).not.toBeNull();
 
     await sendMessage(db, "mackaye", {
       channel: "vivijure",
-      to: ["cursor-laptop"],
+      to: ["conrad"],
       type: "status",
-      body: "for cursor-laptop",
+      body: "for conrad",
     });
-    const second = await pollMessages(db, "cursor-laptop", {
+    const second = await pollMessages(db, "conrad", {
       channel: "vivijure",
       since: first.cursor!,
     });
-    expect(second.messages.map((m) => m.body)).toEqual(["for cursor-laptop"]);
+    expect(second.messages.map((m) => m.body)).toEqual(["for conrad"]);
   });
 
   it("poll excludes own sends but thread includes them", async () => {
@@ -126,7 +126,7 @@ describe("store", () => {
       body: "own question",
     });
     await new Promise((r) => setTimeout(r, 2));
-    const reply = await sendMessage(db, "cursor-laptop", {
+    const reply = await sendMessage(db, "conrad", {
       channel: "general",
       thread_id: sent.thread_id,
       to: ["mackaye"],
@@ -153,7 +153,7 @@ describe("store", () => {
 
     const mine = await listChannels(db, "mackaye");
     expect(mine.find((c) => c.channel === "general")!.unread).toBe(0);
-    const theirs = await listChannels(db, "cursor-laptop");
+    const theirs = await listChannels(db, "conrad");
     expect(theirs.find((c) => c.channel === "general")!.unread).toBe(1);
   });
 
@@ -174,17 +174,17 @@ describe("store", () => {
 
     await sendMessage(db, "mackaye", {
       channel: "fleet",
-      to: ["cursor-laptop"],
+      to: ["conrad"],
       type: "handoff",
       body: "check bus",
     });
 
-    let channels = await listChannels(db, "cursor-laptop");
+    let channels = await listChannels(db, "conrad");
     expect(channels.find((c) => c.channel === "fleet")!.unread).toBe(1);
 
-    await markChannelSeenLatest(db, "cursor-laptop", "fleet");
+    await markChannelSeenLatest(db, "conrad", "fleet");
 
-    channels = await listChannels(db, "cursor-laptop");
+    channels = await listChannels(db, "conrad");
     expect(channels.find((c) => c.channel === "fleet")!.unread).toBe(0);
   });
 
@@ -193,7 +193,7 @@ describe("store", () => {
 
     await sendMessage(db, "mackaye", {
       channel: "postern",
-      to: ["cursor-laptop"],
+      to: ["conrad"],
       type: "question",
       body: "direct only",
     });
@@ -240,7 +240,7 @@ describe("store", () => {
 
   it("bus_consumers roster reports last_poll_at, null before a poll (#17.2)", async () => {
     const db = makeFakeD1();
-    const roster = ["mackaye", "cursor-laptop"];
+    const roster = ["mackaye", "conrad"];
 
     let consumers = await listConsumers(db, roster);
     // #47 added doorbell reader health to every row; a roster with no rings and
@@ -256,46 +256,46 @@ describe("store", () => {
     };
     expect(consumers).toEqual([
       { name: "mackaye", ...quiet },
-      { name: "cursor-laptop", ...quiet },
+      { name: "conrad", ...quiet },
     ]);
 
-    await pollMessages(db, "cursor-laptop", { channel: "general" });
+    await pollMessages(db, "conrad", { channel: "general" });
     consumers = await listConsumers(db, roster);
     expect(consumers.find((c) => c.name === "mackaye")!.last_poll_at).toBeNull();
-    expect(consumers.find((c) => c.name === "cursor-laptop")!.last_poll_at).not.toBeNull();
+    expect(consumers.find((c) => c.name === "conrad")!.last_poll_at).not.toBeNull();
   });
 
   it("thread attaches sender-side delivery: polled_after then acked_at (#17.3)", async () => {
     const db = makeFakeD1();
-    const roster = ["mackaye", "cursor-laptop"];
+    const roster = ["mackaye", "conrad"];
 
     const sent = await sendMessage(
       db,
       "mackaye",
-      { channel: "vivijure", to: ["cursor-laptop"], type: "handoff", body: "pick this up", requires_ack: true },
+      { channel: "vivijure", to: ["conrad"], type: "handoff", body: "pick this up", requires_ack: true },
       roster,
     );
 
     // Before the recipient polls: addressed but not yet seen or acked.
     let thread = await getThread(db, sent.thread_id, "mackaye", roster);
     let delivery = thread.find((m) => m.id === sent.id)!.delivery!;
-    expect(delivery).toEqual([{ recipient: "cursor-laptop", acked_at: null, polled_after: false, webhook_delivered_at: null, webhook_attempts: 0 }]);
+    expect(delivery).toEqual([{ recipient: "conrad", acked_at: null, polled_after: false, webhook_delivered_at: null, webhook_attempts: 0 }]);
 
     // Recipient polls (records last_poll_at), then acks.
     await new Promise((r) => setTimeout(r, 2));
-    await pollMessages(db, "cursor-laptop", { channel: "vivijure" });
-    await ackMessage(db, "cursor-laptop", sent.id, "on it");
+    await pollMessages(db, "conrad", { channel: "vivijure" });
+    await ackMessage(db, "conrad", sent.id, "on it");
 
     thread = await getThread(db, sent.thread_id, "mackaye", roster);
     delivery = thread.find((m) => m.id === sent.id)!.delivery!;
-    expect(delivery[0]!.recipient).toBe("cursor-laptop");
+    expect(delivery[0]!.recipient).toBe("conrad");
     expect(delivery[0]!.polled_after).toBe(true);
     expect(delivery[0]!.acked_at).not.toBeNull();
   });
 
   it("broadcast delivery reports against the full roster minus the sender (#17.3)", async () => {
     const db = makeFakeD1();
-    const roster = ["mackaye", "cursor-laptop", "strummer"];
+    const roster = ["mackaye", "conrad", "strummer"];
 
     const sent = await sendMessage(
       db,
@@ -306,7 +306,7 @@ describe("store", () => {
 
     const thread = await getThread(db, sent.thread_id, "mackaye", roster);
     const delivery = thread.find((m) => m.id === sent.id)!.delivery!;
-    expect(delivery.map((d) => d.recipient).sort()).toEqual(["cursor-laptop", "strummer"]);
+    expect(delivery.map((d) => d.recipient).sort()).toEqual(["conrad", "strummer"]);
   });
 
   it("re-surfaces an unacked requires_ack message on every poll until acked (#21 incident replay)", async () => {
@@ -376,19 +376,19 @@ describe("store", () => {
 
   it("ack is idempotent: repeats keep one row, first acked_at, one ack message (#22)", async () => {
     const db = makeFakeD1();
-    const roster = ["mackaye", "cursor-laptop"];
+    const roster = ["mackaye", "conrad"];
     const sent = await sendMessage(
       db,
       "mackaye",
-      { channel: "vivijure", to: ["cursor-laptop"], type: "handoff", body: "pick up", requires_ack: true },
+      { channel: "vivijure", to: ["conrad"], type: "handoff", body: "pick up", requires_ack: true },
       roster,
     );
-    await pollMessages(db, "cursor-laptop", { channel: "vivijure" });
+    await pollMessages(db, "conrad", { channel: "vivijure" });
 
-    const first = await ackMessage(db, "cursor-laptop", sent.id, "on it");
+    const first = await ackMessage(db, "conrad", sent.id, "on it");
     await new Promise((r) => setTimeout(r, 2));
-    const second = await ackMessage(db, "cursor-laptop", sent.id, "on it again");
-    const third = await ackMessage(db, "cursor-laptop", sent.id);
+    const second = await ackMessage(db, "conrad", sent.id, "on it again");
+    const third = await ackMessage(db, "conrad", sent.id);
 
     // Every repeat returns the FIRST ack unchanged (true no-op).
     expect(second.id).toBe(first.id);
@@ -399,7 +399,7 @@ describe("store", () => {
     const handoff = thread.find((m) => m.id === sent.id)!;
     // Delivery report: a single ack, acked_at is the FIRST ack time.
     expect(handoff.delivery).toEqual([
-      { recipient: "cursor-laptop", acked_at: first.created_at, polled_after: true, webhook_delivered_at: null, webhook_attempts: 0 },
+      { recipient: "conrad", acked_at: first.created_at, polled_after: true, webhook_delivered_at: null, webhook_attempts: 0 },
     ]);
     // Exactly one ack-type message landed in the thread.
     expect(thread.filter((m) => m.type === "ack")).toHaveLength(1);

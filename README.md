@@ -29,7 +29,7 @@ npm run dev
 Set secrets for local dev in `.dev.vars`:
 
 ```
-MCP_TOKEN=cursor-laptop=dev-cursor,lead=dev-lead
+MCP_TOKEN=mackaye=dev-lead,conrad=dev-operator
 MCP_TOKEN_EXTRA=lead-fleet=dev-lead-fleet
 ```
 
