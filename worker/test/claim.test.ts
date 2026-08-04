@@ -3,7 +3,7 @@ import { makeFakeD1, type FakeD1State } from "./fake-d1";
 import { claimMessage, getThread, pollMessages, sendMessage } from "../src/store";
 import { BusError } from "../src/bus-error";
 
-const ROSTER = ["mackaye", "albini", "gordon", "mould"];
+const ROSTER = ["mackaye", "albini", "strummer", "rollins"];
 
 function freshState(): FakeD1State {
   return { messages: [], cursors: [], acks: [], consumers: [] };
@@ -47,14 +47,14 @@ describe("claimMessage (#41)", () => {
     const handoff = await broadcastHandoff(db);
 
     await claimMessage(db, "albini", handoff.id);
-    const lost = await claimMessage(db, "gordon", handoff.id, "on it, starting now");
+    const lost = await claimMessage(db, "strummer", handoff.id, "on it, starting now");
 
     expect(lost.claimed).toBe(false);
     expect(lost.claim.claimed_by).toBe("albini");
     // The loser's claim body is discarded: the receipt must state the winner,
     // not read like the loser took the work.
     expect(lost.ack.body).toBe(`ack ${handoff.id} (claim lost to albini)`);
-    expect(state.acks.some((a) => a.message_id === handoff.id && a.from_consumer === "gordon")).toBe(
+    expect(state.acks.some((a) => a.message_id === handoff.id && a.from_consumer === "strummer")).toBe(
       true,
     );
   });
@@ -65,9 +65,9 @@ describe("claimMessage (#41)", () => {
     const handoff = await broadcastHandoff(db);
 
     await claimMessage(db, "albini", handoff.id);
-    await claimMessage(db, "mould", handoff.id);
+    await claimMessage(db, "rollins", handoff.id);
 
-    const page = await pollMessages(db, "mould", {});
+    const page = await pollMessages(db, "rollins", {});
     expect(page.pending_acks.find((m) => m.id === handoff.id)).toBeUndefined();
   });
 
@@ -107,7 +107,7 @@ describe("claimMessage (#41)", () => {
       { channel: "general", to: ["albini"], type: "handoff", body: "direct work" },
       ROSTER,
     );
-    await expect(claimMessage(db, "gordon", direct.id)).rejects.toThrow(/not authorized/);
+    await expect(claimMessage(db, "strummer", direct.id)).rejects.toThrow(/not authorized/);
 
     await expect(claimMessage(db, "albini", "msg_nope")).rejects.toThrow(/not found/);
   });
@@ -130,20 +130,20 @@ describe("claimMessage (#41)", () => {
     const handoff = await broadcastHandoff(db);
 
     // Unclaimed: annotation present and null for thread readers + pollers.
-    const before = await getThread(db, handoff.thread_id, "gordon", ROSTER);
+    const before = await getThread(db, handoff.thread_id, "strummer", ROSTER);
     expect(before.find((m) => m.id === handoff.id)?.claim).toBeNull();
-    const pageBefore = await pollMessages(db, "gordon", {});
+    const pageBefore = await pollMessages(db, "strummer", {});
     expect(pageBefore.pending_acks.find((m) => m.id === handoff.id)?.claim).toBeNull();
 
     await claimMessage(db, "albini", handoff.id);
 
     // Claimed: every reader (including the sender's delivery-report path) sees
     // the winner without needing the delivery report.
-    for (const reader of ["gordon", "mackaye"]) {
+    for (const reader of ["strummer", "mackaye"]) {
       const thread = await getThread(db, handoff.thread_id, reader, ROSTER);
       expect(thread.find((m) => m.id === handoff.id)?.claim?.claimed_by).toBe("albini");
     }
-    const pageAfter = await pollMessages(db, "mould", {});
+    const pageAfter = await pollMessages(db, "rollins", {});
     expect(pageAfter.pending_acks.find((m) => m.id === handoff.id)?.claim?.claimed_by).toBe(
       "albini",
     );
