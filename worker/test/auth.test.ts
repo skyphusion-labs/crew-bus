@@ -4,8 +4,8 @@ import { isVisibleTo, retentionCutoff } from "../src/bus-types";
 
 describe("matchConsumer", () => {
   it("matches name=token entries", () => {
-    const secret = "cursor-laptop=abc,mackaye=def";
-    expect(matchConsumer(secret, "abc")).toBe("cursor-laptop");
+    const secret = "conrad=abc,mackaye=def";
+    expect(matchConsumer(secret, "abc")).toBe("conrad");
     expect(matchConsumer(secret, "def")).toBe("mackaye");
     expect(matchConsumer(secret, "nope")).toBeNull();
   });
@@ -17,7 +17,7 @@ describe("matchConsumer", () => {
 
 describe("consumerNames", () => {
   it("returns the roster names without token values", () => {
-    expect(consumerNames("cursor-laptop=abc,mackaye=def").sort()).toEqual(["cursor-laptop", "mackaye"]);
+    expect(consumerNames("conrad=abc,mackaye=def").sort()).toEqual(["conrad", "mackaye"]);
   });
 
   it("is empty when the secret is unset", () => {
@@ -31,8 +31,8 @@ describe("isVisibleTo", () => {
   });
 
   it("respects explicit recipients", () => {
-    expect(isVisibleTo(["cursor-laptop"], "cursor-laptop")).toBe(true);
-    expect(isVisibleTo(["cursor-laptop"], "mackaye")).toBe(false);
+    expect(isVisibleTo(["conrad"], "conrad")).toBe(true);
+    expect(isVisibleTo(["conrad"], "mackaye")).toBe(false);
   });
 });
 
