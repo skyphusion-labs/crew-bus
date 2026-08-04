@@ -1,3 +1,7 @@
+## v0.7.1
+
+PATCH: dependency updates on main since v0.7.0. Tag `v0.7.1` deploys the Worker; npm uses separate `crew-bus-v*` tags if needed.
+
 ## Unreleased (mcp client)
 
 ### Fix -- the stdio client advertised a version it never had (`0.1.0`)
