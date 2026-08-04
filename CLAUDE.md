@@ -13,6 +13,35 @@ Private cross-crew bus. See `README.md` and [fc#427](https://github.com/skyphusi
 - Deploy at your Worker URL; runbook example in Skyphusion private `fleet-chezmoi/system/crew-bus/`.
 - **npm:** `@skyphusion/crew-bus` (stdio MCP client). Public release checklist: `docs/PUBLIC-RELEASE.md`.
 
-## Release
+## Release / tagging
 
-SemVer `0.MINOR.PATCH`. Tag `v*` triggers deploy workflow when wired.
+SemVer `0.MINOR.PATCH` (pre-1.0). Two **separate** tag namespaces (do not mix them up). Full public
+checklist: `docs/PUBLIC-RELEASE.md`.
+
+| Tag pattern | Workflow | Effect |
+|-------------|----------|--------|
+| `v*` (e.g. `v0.7.1`) | `deploy.yml` | Deploy Worker to Cloudflare |
+| `crew-bus-v*` (e.g. `crew-bus-v0.7.1`) | `publish-npm.yml` | Publish `@skyphusion/crew-bus` |
+
+A Worker deploy tag does **not** publish npm; an npm tag does **not** deploy the Worker.
+A bare merge to `main` runs CI only and does **not** redeploy production.
+
+### Cut a Worker release (`v*`)
+
+1. **Release PR on `main`** if version pins or changelog need a bump (keep worker version
+   discipline in tree as you already do for other estate Workers).
+2. Tag and push:
+
+```bash
+git fetch origin main && git checkout main && git pull --ff-only
+git tag -a vX.Y.Z -m "vX.Y.Z"
+git push origin vX.Y.Z
+```
+
+3. Confirm `deploy.yml` green. Tag must be on `origin/main` (workflow asserts ancestry).
+
+### Cut an npm package release (`crew-bus-v*`)
+
+1. Bump `mcp/package.json` version on `main` if needed.
+2. Tag `crew-bus-vX.Y.Z` and push (or Actions → Publish npm package → workflow_dispatch).
+3. Verify: `npm view @skyphusion/crew-bus version`.
