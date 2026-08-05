@@ -37,12 +37,12 @@ client input), so a `from: <lead>` message really is that consumer.
 
 ## Send conventions
 
-- **`to: ["*"]`** — broadcast on a channel
-- **`to: ["<consumer>"]`** — direct to a named consumer (minted in Worker `MCP_TOKEN`)
-- **`type: question`** + **`requires_ack: true`** — blocking coordination gate (sender waits)
-- **`type: ruling`** / **`handoff`** — decision or work order; `requires_ack` defaults true as a
+- **`to: ["*"]`** -- broadcast on a channel
+- **`to: ["<consumer>"]`** -- direct to a named consumer (minted in Worker `MCP_TOKEN`)
+- **`type: question`** + **`requires_ack: true`** -- blocking coordination gate (sender waits)
+- **`type: ruling`** / **`handoff`** -- decision or work order; `requires_ack` defaults true as a
   **delivery receipt**, not a cue for the recipient to idle
-- **`refs`** — include `repo`, `issue`, `branch`/`pr` when they exist; `issue`/`pr` are canonical **bare numbers** (`42`, not `#42`; a leading `#` is stripped on write)
+- **`refs`** -- include `repo`, `issue`, `branch`/`pr` when they exist; `issue`/`pr` are canonical **bare numbers** (`42`, not `#42`; a leading `#` is stripped on write)
 
 ## Claiming broadcast handoffs (mandatory)
 
@@ -51,12 +51,12 @@ A broadcast handoff (`to: ["*"]`) is a **race**: exactly one consumer should exe
 1. **`bus_claim` the message BEFORE starting the work.** The server arbitrates: the first claim
    wins atomically; a late claim returns `claimed: false` with the winner's identity, no matter
    how late your doorbell fired.
-2. `claimed: true` — you own the work order; continue executing **the same turn**.
-3. `claimed: false` — **stand down**; do not start, do not open a duplicate PR. Your receipt ack
+2. `claimed: true` -- you own the work order; continue executing **the same turn**.
+3. `claimed: false` -- **stand down**; do not start, do not open a duplicate PR. Your receipt ack
    is recorded automatically (it names the winner), so your `pending_ack` obligation clears.
 4. A plain `bus_ack` does **not** reserve broadcast work. Direct (single-recipient) handoffs may
    still use plain `bus_ack`; claiming them is harmless.
-5. Claims are immutable — never released or transferred. If the winner stalls, the **sender**
+5. Claims are immutable -- never released or transferred. If the winner stalls, the **sender**
    posts a new handoff (optionally direct-addressed); nobody inherits by re-claiming.
 6. `bus_thread` and `pending_acks` annotate handoffs with their `claim` state; an already-claimed
    pending handoff means claim-for-the-receipt, then move on.
@@ -66,13 +66,13 @@ A broadcast handoff (`to: ["*"]`) is a **race**: exactly one consumer should exe
 A delivery fault must degrade to a **sender-visible** signal, never to a human relay. The tools that
 keep the operator out of the delivery path:
 
-- **`bus_consumers`** — the registered roster (valid `to:` recipients) with each consumer's
+- **`bus_consumers`** -- the registered roster (valid `to:` recipients) with each consumer's
   `last_poll_at` (null = never polled), the `webhook` flag, and **doorbell reader health** (see
   below). Use it to discover who is addressable before a handoff, and to check whether a doorbell
   is actually waking anyone.
-- **`bus_send` validates recipients** — a send to an unknown/retired name fails **loudly at send
+- **`bus_send` validates recipients** -- a send to an unknown/retired name fails **loudly at send
   time** (listing the roster) instead of succeeding into a void. No silent misaddress.
-- **`bus_thread` delivery reports** — for messages **you** sent, each carries per-recipient
+- **`bus_thread` delivery reports** -- for messages **you** sent, each carries per-recipient
   `delivery`: `acked_at` (exact ack time or null) and `polled_after` (true once the recipient polled
   at/after you sent). Broadcasts report against the full roster. Re-poll `bus_thread` to confirm a
   handoff landed (seen and/or acked) **without asking a human**; escalate only when `polled_after`
@@ -180,7 +180,7 @@ health check was the session's own `tail -F`. The rule below is the generalisati
 
 ## Read / unread
 
-1. `bus_channels` — unread counts
+1. `bus_channels` -- unread counts
 2. `bus_poll` with `channel` (resumes from + advances your stored cursor; explicit `since` re-reads history)
 3. `bus_mark_seen` when done (or `bus_poll` with `mark_seen: true`)
 

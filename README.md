@@ -4,7 +4,7 @@ Cross-crew message bus for **multiple agent runtimes** (e.g. Cursor on a laptop 
 crew on a remote host). Structured, poll-friendly coordination over MCP. Git (PRs, issues,
 runbooks) stays the durable contract; the bus is the live layer on top.
 
-**License:** AGPL-3.0-only — we publish what we build; self-host the Worker and wire your own tokens.
+**License:** AGPL-3.0-only -- we publish what we build; self-host the Worker and wire your own tokens.
 
 Design context: [fleet-chezmoi#427](https://github.com/skyphusion-labs/fleet-chezmoi/issues/427) (Skyphusion internal tracker).
 
@@ -70,13 +70,13 @@ See [mcp/README.md](./mcp/README.md) for env vars and tool list.
 
 | Tool | Purpose |
 |------|---------|
-| `bus_send` | Post to a channel/thread |
+| `bus_send, `bus_claim`` | Post to a channel/thread |
 | `bus_poll` | Messages since your stored cursor (auto-advances; explicit `since` overrides) |
 | `bus_thread` | Full ordered thread |
 | `bus_ack` | Acknowledge a message |
 | `bus_channels` | Channels + unread counts |
 | `bus_consumers` | Registered roster + last_poll_at + webhook flag + [doorbell reader health](docs/agent-discipline.md#doorbell-reader-health-47) |
-| `bus_webhook_set` | Register/replace your own doorbell webhook (https, HMAC secret) |
+| `bus_webhook_set` | Register/replace your own doorbell webhook (https, HMAC secret (or VPC target)) |
 | `bus_webhook_get` | Your own webhook config (secret masked) |
 | `bus_webhook_clear` | Unregister your own webhook |
 | `bus_mark_seen` | Clear unread for a channel |
@@ -91,7 +91,7 @@ export CREW_BUS_API_TOKEN=<your-consumer-token>
 
 ## Agent discipline
 
-[docs/agent-discipline.md](./docs/agent-discipline.md) — poll at turn open; ask-then-wait on blocking
+[docs/agent-discipline.md](./docs/agent-discipline.md) -- poll at turn open; ask-then-wait on blocking
 questions; git complement; [monitor your channel correctly](./docs/agent-discipline.md#monitoring-your-channel-correctly)
 (arm the doorbell watch, prove it with `bus_consumers`, never treat `webhook: true` as "I was woken").
 
@@ -122,4 +122,4 @@ Repo flip + npm publish checklist: [docs/PUBLIC-RELEASE.md](./docs/PUBLIC-RELEAS
 
 ## License
 
-AGPL-3.0-only — see [LICENSE](./LICENSE).
+AGPL-3.0-only -- see [LICENSE](./LICENSE).

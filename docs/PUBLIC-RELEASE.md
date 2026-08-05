@@ -1,6 +1,6 @@
 # Public release checklist (crew-bus)
 
-**Status: DRAFT — execute after Thursday 2026-07-10 cross-crew canary passes.**
+**Status: DRAFT -- execute after Thursday 2026-07-10 cross-crew canary passes.**
 
 Releasing the repo and `@skyphusion/crew-bus` npm package does **not** expose a live bus: the
 Worker stays bearer-gated; consumers need URL + token. Public code ≠ public service.
@@ -15,7 +15,7 @@ Worker stays bearer-gated; consumers need URL + token. Public code ≠ public se
 
 ## Secrets / topology scan (grep-zero)
 
-From repo root — must be **zero** matches before flip. Use **generic** patterns only in
+From repo root -- must be **zero** matches before flip. Use **generic** patterns only in
 this public checklist (never embed live production hostnames or D1 ids here):
 
 ```bash
@@ -40,7 +40,7 @@ Optional: scan git history before first public flip if anything ever committed b
 1. Merge this PR (npm metadata + publish workflow + docs + public-safe CI/deploy)
 2. Settings → Change visibility → **Public**
 3. Confirm **aviation-grade-main** ruleset still required (already applied)
-4. Confirm org Default runner group still has `allows_public_repositories=false` (fc#394) —
+4. Confirm org Default runner group still has `allows_public_repositories=false` (fc#394)  -- 
    public jobs must stay on `ubuntu-latest`
 
 ## Tag namespaces (do not fat-finger)
