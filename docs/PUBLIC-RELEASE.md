@@ -47,8 +47,8 @@ Optional: scan git history before first public flip if anything ever committed b
 
 | Tag pattern | Workflow | Effect |
 | --- | --- | --- |
-| `v*` (e.g. `v0.1.2`) | `deploy.yml` | Deploy Worker to Cloudflare |
-| `crew-bus-v*` (e.g. `crew-bus-v0.1.2`) | `publish-npm.yml` | Publish `@skyphusion/crew-bus` |
+| `v*` (e.g. `v0.7.1`) | `deploy.yml` | Deploy Worker to Cloudflare |
+| `crew-bus-v*` (e.g. `crew-bus-v0.6.5`) | `publish-npm.yml` | Publish `@skyphusion/crew-bus` |
 
 A Worker deploy tag does **not** publish npm, and an npm tag does **not** deploy the Worker.
 
@@ -60,8 +60,8 @@ A Worker deploy tag does **not** publish npm, and an npm tag does **not** deploy
 3. Tag and push:
 
 ```bash
-git tag crew-bus-v0.1.2
-git push origin crew-bus-v0.1.2
+git tag crew-bus-v0.6.5
+git push origin crew-bus-v0.6.5
 ```
 
 Or: Actions → **Publish npm package** → workflow_dispatch.
