@@ -1,7 +1,7 @@
 {
   "name": "crew-bus",
   "private": true,
-  "description": "Cross-crew MCP message bus (Cursor ↔ Claude crew)",
+  "description": "Cross-crew MCP message bus (Cursor \u2194 Claude crew)",
   "license": "AGPL-3.0-only",
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
@@ -10,5 +10,8 @@
   "workspaces": [
     "worker",
     "mcp"
-  ]
+  ],
+  "overrides": {
+    "undici": "7.29.0"
+  }
 }
