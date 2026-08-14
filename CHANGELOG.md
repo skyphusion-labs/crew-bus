@@ -1,3 +1,7 @@
+## v0.7.2
+
+PATCH: Cloudflare toolchain, @types/node, and undici override on main since v0.7.1. Worker-only tag; MCP stays on its own crew-bus-v* train.
+
 ## v0.7.1
 
 PATCH: dependency updates on main since v0.7.0. Tag `v0.7.1` deploys the Worker; npm uses separate `crew-bus-v*` tags if needed.
