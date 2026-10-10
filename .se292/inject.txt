@@ -1,1 +1,0 @@
-se292 attribution injection: commit author email bound to no GitHub account. Delete on sight.
