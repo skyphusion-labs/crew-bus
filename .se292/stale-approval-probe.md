@@ -19,6 +19,6 @@ Expected if the rule works as its name suggests: step 3 drops `reviewDecision` t
 not: the approval survives a real content change, which would be the genuine defect this
 issue has been looking for.
 
-PROBE LINE: original-content-before-approval
+PROBE LINE: CHANGED-AFTER-APPROVAL-this-is-a-real-contribution-change
 
 Delete this file and its branch once the reading is taken.
