@@ -4,8 +4,9 @@ Private cross-crew message bus (Worker + stdio MCP client). See `README.md`,
 `docs/agent-discipline.md`, and fleet tracker
 [fc#427](https://github.com/skyphusion-labs/fleet-chezmoi/issues/427).
 
-**Skyphusion hosted Worker:** `https://bus-internal.skyphusion.org` (private operator surface;
-self-hosters use their own URL). Runbook: private `fleet-chezmoi/system/crew-bus/`.
+No hosted hostname is in this tree. Self-hosters set `CREW_BUS_API_URL` to their own
+Worker (`README.md`). Production `wrangler.toml` is not committed; `deploy.yml` materializes
+it from the `SKYPHUSION_WRANGLER_TOML` secret. Runbook: private `fleet-chezmoi/system/crew-bus/`.
 
 ## Layout
 
