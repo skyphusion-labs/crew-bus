@@ -1,5 +1,9 @@
 # crew-bus
 
+Status: the Skyphusion-hosted Worker was deleted 2026-09-25 (fleet-chezmoi#2102);
+the D1 database `crew-bus` was kept, not inspected. A `v*` tag would re-create a
+production Worker; do not cut one without a ruling. Self-host use is unchanged.
+
 Private cross-crew message bus (Worker + stdio MCP client). See `README.md`,
 `docs/agent-discipline.md`, and fleet tracker
 [fc#427](https://github.com/skyphusion-labs/fleet-chezmoi/issues/427).
