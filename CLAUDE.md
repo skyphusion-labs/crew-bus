@@ -1,11 +1,16 @@
 # crew-bus
 
+Status: the Skyphusion-hosted Worker was deleted 2026-09-25 (fleet-chezmoi#2102);
+the D1 database `crew-bus` was kept, not inspected. A `v*` tag would re-create a
+production Worker; do not cut one without a ruling. Self-host use is unchanged.
+
 Private cross-crew message bus (Worker + stdio MCP client). See `README.md`,
 `docs/agent-discipline.md`, and fleet tracker
 [fc#427](https://github.com/skyphusion-labs/fleet-chezmoi/issues/427).
 
-**Skyphusion hosted Worker:** `https://bus-internal.skyphusion.org` (private operator surface;
-self-hosters use their own URL). Runbook: private `fleet-chezmoi/system/crew-bus/`.
+No hosted hostname is in this tree. Self-hosters set `CREW_BUS_API_URL` to their own
+Worker (`README.md`). Production `wrangler.toml` is not committed; `deploy.yml` materializes
+it from the `SKYPHUSION_WRANGLER_TOML` secret. Runbook: private `fleet-chezmoi/system/crew-bus/`.
 
 ## Layout
 
