@@ -7,7 +7,7 @@ import pkg from "../package.json";
 
 describe("version", () => {
   it("advertised serverInfo version matches package.json (no npm drift)", () => {
-    expect(VERSION).toBe("x");
+    expect(VERSION).toBe(pkg.version);
   });
 
   it("is not the hardcoded 0.1.0 that this file exists to prevent", () => {
